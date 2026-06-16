@@ -361,3 +361,17 @@ deps
 .rebar3
 _build/
 _checkouts/
+
+# other
+diagrams/*.png
+diagrams/*.pdf
+diagrams/*.svg
+out/diagrams/*.cmapx
+out/diagrams/*.png
+out/diagrams/*.pdf
+out/diagrams/*.svg
+out/diagrams/*.eps
+diagrams/problems/*.png
+diagrams/problems/*.pdf
+diagrams/problems/*.svg
+diagrams/mechanisms/*.png

@@ -1,0 +1,37 @@
+@startuml 05-split-brain-sequence
+skinparam dpi 300
+title Problem 5 — Split-Brain: BEAM vs. K8s Membership (TopScore)
+
+box "Partition A" #f0f8ff
+participant "pod-1\n(:global owner)" as P1
+participant "pod-2" as P2
+end box
+box "Partition B" #fff0f0
+participant "pod-3" as P3
+participant "pod-4" as P4
+end box
+participant ":global" as G
+participant "kubelet\n(all pods)" as K8s
+
+note over P1,P4: healthy 4-node cluster\nsingle leaderboard singleton on pod-1
+
+== AZ network blip — partition ==
+P1 -x P3: connection lost
+note over P1,P2: see pod-3,4 as nodedown
+note over P3,P4: see pod-1,2 as nodedown
+P3 -> G: re-register leaderboard (none visible)
+note over P1,P4 #ffcccc: two singletons now accept\nscore increments independently
+
+== K8s view throughout ==
+K8s -> P1: liveness / readiness
+P1 --> K8s: healthy
+K8s -> P3: liveness / readiness
+P3 --> K8s: healthy
+note over K8s #ffcccc: K8s sees 4 healthy pods,\ntakes no action (blind to BEAM split)
+
+== partition heals ==
+P3 -> P1: reconnect
+G -> G: name clash on leaderboard
+G -> P3: kill duplicate singleton
+note over P3 #ffcccc: scores accumulated in B discarded\nsilent data loss on heal
+@enduml

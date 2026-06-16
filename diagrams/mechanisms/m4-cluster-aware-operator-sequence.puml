@@ -1,0 +1,22 @@
+@startuml m4-cluster-aware-operator-sequence
+skinparam dpi 300
+title M4 — BEAM-Cluster-Aware Operator + Health Bridge
+
+participant "K8s API" as API
+participant "BEAM operator\n(Bonny)" as OP
+participant "Horde / Erlang\ndistribution" as H
+participant "pod" as POD
+
+== reconcile loop ==
+OP -> H: watch membership
+H --> OP: members + handoff state
+OP -> API: set pod readiness gate\n(custom condition = member Up)
+
+== scale-down ==
+API -> POD: terminate (finalizer / preStop)
+POD -> OP: handoff complete?
+OP -> H: drain + hand off processes
+H --> OP: done
+OP -> API: clear finalizer (allow delete)
+note over API #ccffcc: pod kept in endpoints until member healthy;\nnot deleted until handoff done
+@enduml

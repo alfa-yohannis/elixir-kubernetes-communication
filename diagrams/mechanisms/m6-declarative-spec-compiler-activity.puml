@@ -1,0 +1,20 @@
+@startuml m6-declarative-spec-compiler-activity
+skinparam dpi 300
+title M6 — Cross-Layer Spec Compilation
+
+start
+:author single FT spec (one source of truth);
+:parse + validate;
+fork
+  :generate OTP supervision spec\n(strategy, max_restarts, shutdown);
+fork again
+  :generate K8s manifests\n(probes, PDB, grace, anti-affinity);
+end fork
+#ccffcc:deploy both -> cross-layer policy\nconsistent by construction;
+stop
+legend right
+  Change the spec once -> both layers
+  regenerate; eliminates drift between
+  OTP config and K8s manifests.
+endlegend
+@enduml

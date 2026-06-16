@@ -1,0 +1,42 @@
+@startuml 01-liveness-mismatch-activity
+skinparam dpi 300
+title Problem 1 — Liveness Probe Design Trade-off (PayGate)
+
+start
+:kubelet fires liveness probe;
+if (probe type?) then (shallow TCP)
+  if (port open?) then (yes)
+    :report HEALTHY;
+    if (internal subsystem wedged?) then (yes)
+      #ffcccc:broken app kept alive\n(false negative);
+      stop
+    else (no)
+      :correctly healthy;
+      stop
+    endif
+  else (no)
+    :report unhealthy;
+    stop
+  endif
+else (deep /healthz w/ sync dep)
+  if (dependency transient blip?) then (yes)
+    :return 503;
+    if (failureThreshold tolerant?) then (no, threshold 1)
+      #ffcccc:K8s kills a VM that\nOTP would have recovered\n(false positive);
+      stop
+    else (yes, rides out blip)
+      :stays alive, OTP recovers;
+      stop
+    endif
+  else (no)
+    :report HEALTHY;
+    stop
+  endif
+endif
+
+legend right
+  Sweet spot: a deep probe that reflects real
+  internal health + a tolerant failureThreshold
+  + a startupProbe for slow boot.
+endlegend
+@enduml

@@ -1,0 +1,36 @@
+@startuml 02-double-recovery-sequence
+skinparam dpi 300
+title Problem 2 — Double Recovery / Who Owns the Failure (SensorHub)
+
+participant "Device\n(bad firmware)" as Dev
+participant "Decoder\nGenServer" as Dec
+participant "Supervisor\n(one_for_one)" as Sup
+participant "BEAM VM" as VM
+participant "kubelet /\nReplicaSet" as K8s
+
+Dev -> Dec: malformed frame
+Dec -> Dec: MatchError (crash)
+Dec --> Sup: EXIT
+Sup -> Dec: restart child
+
+loop device keeps resending
+  Dev -> Dec: same malformed frame
+  Dec -> Dec: crash
+  Dec --> Sup: EXIT
+  Sup -> Dec: restart child
+end
+
+alt max_restarts too high (e.g. 1000)
+  note over Dec,VM #ffcccc: crash-loops 1000s/min\nlogs flood, a core pegs\nbut the VM stays UP
+  K8s -> VM: liveness probe
+  VM --> K8s: healthy
+  note over K8s #ffcccc: K8s is blind — failure festers
+else max_restarts exhausted (3 in 5s) — deliberate escalation
+  Sup -> Sup: restart intensity exceeded
+  Sup -> VM: terminate supervision tree
+  VM -> VM: exit(non-zero)
+  VM --> K8s: container exited
+  K8s -> K8s: restart pod (CrashLoopBackOff)
+  note over K8s #ccffcc: runtime escalated to orchestrator\nbackoff breaks the loop, alert fires
+end
+@enduml

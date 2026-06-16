@@ -1,0 +1,21 @@
+@startuml m7-pdb-quorum-coupling-sequence
+skinparam dpi 300
+title M7 — PDB / maxUnavailable Coupled to BEAM Quorum
+
+participant "Quorum\ncontroller" as QC
+participant "Horde / cluster" as H
+participant "K8s API\n(PDB)" as API
+participant "Eviction / drain\nAPI" as EV
+
+QC -> H: cluster size, quorum threshold,\nhandoff throughput
+QC -> API: set PDB minAvailable = quorum\nmaxUnavailable = handoff capacity
+== node drain ==
+EV -> API: evict pod?
+alt would break quorum / exceed handoff
+  API --> EV: DENY (PDB)
+  note over EV #ccffcc: quorum preserved
+else within budget
+  API --> EV: ALLOW
+  EV -> H: handoff; proceed
+end
+@enduml

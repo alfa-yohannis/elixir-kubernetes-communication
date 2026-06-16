@@ -1,0 +1,31 @@
+@startuml 01-liveness-mismatch-sequence
+skinparam dpi 300
+title Problem 1 — Liveness Granularity Mismatch (PayGate)\nFalse negative: VM alive, app wedged, probe still passes
+
+actor Client
+participant "kubelet\n(liveness probe)" as Kubelet
+participant "Cowboy\nlistener :4000" as Cowboy
+participant "Finch pool\n(GenServers)" as Finch
+participant "Fraud API\n(external)" as Fraud
+
+== Normal traffic ==
+Client -> Cowboy: POST /charge
+Cowboy -> Finch: checkout worker
+Finch -> Fraud: score(charge)
+Fraud --> Finch: 200 OK
+Finch --> Cowboy: result
+Cowboy --> Client: 200 OK
+
+== Dependency hangs (half-open TCP, no timeout) ==
+Client -> Cowboy: POST /charge
+Cowboy -> Finch: checkout worker
+Finch -> Fraud: score(charge)
+note right of Fraud: connection half-open\nno response, no timeout
+Finch -> Finch: worker blocks indefinitely
+note over Finch #ffcccc: all pooled workers blocked\n100% of charges stall
+
+== Liveness probe still passes ==
+Kubelet -> Cowboy: TCP connect :4000
+Cowboy --> Kubelet: ACK (socket accepted)
+note over Kubelet #ffcccc: probe = HEALTHY\nVM alive but app broken\n=> K8s never restarts the pod
+@enduml

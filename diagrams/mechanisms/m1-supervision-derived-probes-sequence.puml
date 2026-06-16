@@ -1,0 +1,23 @@
+@startuml m1-supervision-derived-probes-sequence
+skinparam dpi 300
+title M1 — Supervision-Tree-Derived Probe Semantics
+
+participant "kubelet" as K
+participant "/healthz\n(derived)" as P
+participant "Health deriver" as D
+participant "OTP supervision\ntree" as S
+
+K -> P: GET /healthz (readiness)
+P -> D: compute health
+D -> S: query child states + restart intensity
+S --> D: subtree A: 60 restarts/5s\nsubtree B: wedged
+D -> D: apply rules\n(critical-subtree thresholds)
+alt critical subtree unhealthy
+  D --> P: 503
+  P --> K: NOT ready / fail
+  note over K #ccffcc: K8s acts on REAL supervision\nhealth (deroute / restart)
+else healthy
+  D --> P: 200
+  P --> K: ready
+end
+@enduml

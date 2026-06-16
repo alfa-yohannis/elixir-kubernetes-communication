@@ -1,0 +1,29 @@
+@startuml 04-rolling-deploy-activity
+skinparam dpi 300
+title Problem 4 — SIGTERM Drain Race (CoEdit)
+
+start
+:receive SIGTERM;
+:start grace timer (30s);
+:drain Phoenix endpoint;
+:begin Horde handoff (400 docs);
+fork
+  :serialize + transfer CRDT per doc\n(~45s total under load);
+fork again
+  :grace timer counts down;
+end fork
+if (handoff done before deadline?) then (yes)
+  #ccffcc:clean shutdown, no state loss;
+  stop
+else (no - 30s deadline hit first)
+  :K8s sends SIGKILL;
+  #ffcccc:~150 docs die with unsynced edits\nusers lose recent changes;
+  stop
+endif
+
+legend right
+  Mitigations: align grace period to measured
+  handoff time; cap maxUnavailable; checkpoint
+  CRDTs; preStop sleep for endpoint propagation.
+endlegend
+@enduml

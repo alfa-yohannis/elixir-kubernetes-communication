@@ -1,0 +1,64 @@
+% readme.tex — \input dari report.tex (sumber: README proyek)
+\section{Komunikasi BEAM--Kubernetes: Kapan Diperlukan?}
+\label{sec:komunikasi}
+
+Misalkan sebuah aplikasi Elixir berjalan di dalam sebuah \emph{pod}. Kapan komunikasi
+antara runtime BEAM dan Kubernetes benar-benar \emph{diperlukan}? Pertanyaan ini
+menyangkut lalu lintas yang melintasi perbatasan antara \emph{control plane} Kubernetes
+dan runtime BEAM. Lalu lintas tersebut mengalir dalam tiga arah: (i)~\emph{K8s
+$\rightarrow$ Elixir}, ketika \emph{control plane} memberi sinyal atau konfigurasi ke
+aplikasi; (ii)~\emph{Elixir $\rightarrow$ API K8s}, ketika aplikasi mengueri atau
+mengendalikan \emph{cluster}; dan (iii)~\emph{Elixir $\leftrightarrow$ Elixir melalui
+K8s}, ketika antar-\emph{pod} saling menemukan untuk membentuk \emph{cluster} BEAM.
+
+Inti pemahamannya: untuk aplikasi \emph{stateless} sederhana, hampir tidak ada komunikasi
+yang diperlukan---BEAM berjalan, supervisor OTP menyalakan ulang \emph{process} yang
+\emph{crash}, dan Kubernetes me-\emph{restart} \emph{pod} bila seluruh VM mati. Kebutuhan
+komunikasi muncul pada situasi spesifik yang dipetakan oleh lima kategori berikut.
+
+\section{Lima Kategori Komunikasi}
+\label{sec:kategori}
+\begin{description}[leftmargin=2.2em,style=nextline]
+  \item[A. Pembentukan \emph{cluster} \& penemuan \emph{peer} (Elixir$\leftrightarrow$Elixir via K8s).]
+    Distribusi BEAM perlu mengetahui alamat node lain, sementara IP \emph{pod} bersifat
+    fana; penemuan harus berasal dari Kubernetes melalui libcluster~\cite{libcluster}
+    (API atau DNS \emph{headless service}). Contoh kebutuhan: \emph{Phoenix.PubSub},
+    \emph{Presence}, Horde~\cite{horde}, \emph{singleton} global, cache terdistribusi.
+  \item[B. Sinyal siklus hidup \& kesehatan \emph{pod} (K8s$\rightarrow$Elixir).]
+    \emph{Liveness}/\emph{readiness probe}, \emph{graceful shutdown} via \texttt{SIGTERM}
+    dengan \emph{draining} dan \emph{handoff}, serta \emph{preStop hook}.
+  \item[C. Injeksi konfigurasi \& identitas (K8s$\rightarrow$Elixir).]
+    \emph{ConfigMap}, \emph{Secret} (termasuk \emph{cookie} distribusi Erlang yang harus
+    seragam antar-\emph{pod}), dan \emph{Downward API} (\texttt{POD\_IP}, \texttt{POD\_NAME})
+    untuk menyusun \texttt{RELEASE\_NODE}.
+  \item[D. Observabilitas \& sinyal penskalaan (Elixir$\rightarrow$ekosistem K8s).]
+    Metrik Prometheus yang memberi makan HPA/KEDA~\cite{keda}; penskalaan mengubah jumlah
+    \emph{pod} sehingga memicu ulang kategori A dan B.
+  \item[E. Kontrol aktif \emph{cluster} (Elixir$\rightarrow$API K8s).]
+    Pola \emph{operator}: aplikasi mengendalikan Kubernetes sendiri, mis.\ dengan
+    Bonny~\cite{bonny} (mengawasi CRD, membuat \emph{Job}/\emph{Pod}, \emph{leader
+    election} via \emph{Lease}).
+\end{description}
+
+\section{Pembagian Peran: OTP vs.\ Kubernetes}
+\label{sec:overlap}
+Kedua lapis bersifat saling melengkapi, bukan redundan, karena bekerja pada granularitas
+berbeda (Tabel~\ref{tab:overlap}). Keduanya tidak berbicara secara baku; kebutuhan
+komunikasi justru muncul tepat ketika peran mereka beririsan---itulah sumber lima
+permasalahan pada Bab~\ref{ch:problems}.
+
+\begin{table}[H]
+  \centering\small
+  \begin{tabular}{@{}p{0.20\linewidth}p{0.36\linewidth}p{0.36\linewidth}@{}}
+    \toprule
+    & \textbf{Supervisi OTP} & \textbf{Kubernetes} \\
+    \midrule
+    Granularitas & \emph{Process} (dalam VM) & Kontainer / \emph{pod} / \emph{node} \\
+    Pulih dari & Bug logika, gangguan sesaat & OOM, matinya \emph{node}, \emph{image} buruk \\
+    Kecepatan & mikro--milidetik & detik--menit \\
+    State & Dibangun ulang sesuai strategi & \emph{Pod} diganti utuh \\
+    \bottomrule
+  \end{tabular}
+  \caption{Pembagian peran antara supervisi runtime (OTP) dan orkestrator (Kubernetes).}
+  \label{tab:overlap}
+\end{table}

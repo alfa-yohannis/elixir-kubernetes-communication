@@ -1,0 +1,358 @@
+% glossary.tex — \input dari report.tex (lampiran)
+\chapter{Daftar Istilah}
+\label{ch:glosarium}
+
+Lampiran ini menjelaskan istilah-istilah teknis yang dipakai di laporan, disertai
+contoh singkat. Istilah teknis sengaja dipertahankan dalam bahasa aslinya karena itulah
+bentuk yang lazim dipakai praktisi. Daftar ini panjang karena topiknya menjembatani dua
+ekosistem (BEAM/Elixir dan Kubernetes)---namun \textbf{pembaca tidak perlu menghafal
+semuanya}: cukup pahami dua belas istilah inti pada Tabel~\ref{tab:inti}, sisanya bersifat
+rujukan saat diperlukan.
+
+\section*{Peta Cepat: Istilah Inti}
+\begin{table}[H]\centering\small
+\caption{Dua belas istilah inti yang cukup untuk mengikuti alur laporan.}
+\label{tab:inti}
+\begin{tabular}{@{}lp{0.62\linewidth}@{}}
+\toprule
+\textbf{Istilah} & \textbf{Inti} \\
+\midrule
+BEAM & VM Erlang tempat Elixir berjalan. \\
+OTP / \emph{supervision tree} & Pola supervisi yang menyalakan ulang \emph{process} yang gagal. \\
+libcluster & Pembentukan \emph{cluster} BEAM otomatis di Kubernetes. \\
+Horde & \emph{Supervisor}/\emph{registry} terdistribusi dengan \emph{handoff}. \\
+Handoff & Pemindahan \emph{process} beserta \emph{state} ke node lain. \\
+Split-brain & Partisi jaringan yang membuat dua sisi \emph{cluster} sama-sama aktif. \\
+Probe (\emph{liveness}/\emph{readiness}) & Pemeriksaan kesehatan oleh Kubernetes. \\
+Grace period & Tenggat antara \texttt{SIGTERM} dan \texttt{SIGKILL}. \\
+PDB & Batas \emph{pod} yang boleh \emph{down} saat gangguan sukarela. \\
+Operator (Bonny) & Pengendali kustom Kubernetes, ditulis dalam Elixir. \\
+Kubernetes Lease & Objek koordinasi/\emph{fencing} berbasis etcd. \\
+Kuorum BEAM & Jumlah node minimum agar \emph{cluster} otoritatif. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Ekosistem BEAM / Elixir}
+\begin{description}[style=nextline,leftmargin=1.4em]
+  \item[BEAM] Mesin virtual Erlang tempat Elixir dijalankan; menjalankan jutaan
+    \emph{process} ringan terisolasi. \emph{Contoh:} aplikasi Phoenix berjalan sebagai
+    satu instans BEAM dalam satu \emph{pod}.
+  \item[OTP] Pustaka dan pola Erlang (\emph{supervisor}, \texttt{GenServer}) untuk sistem
+    tahan-gagal. \emph{Contoh:} \emph{supervisor} OTP menyalakan ulang pekerja yang \emph{crash}.
+  \item[Supervision tree] Hierarki \emph{supervisor}--anak yang menentukan pola pemulihan.
+    \emph{Contoh:} lihat Listing~\ref{lst:sup}.
+  \item[Supervisor] \emph{Process} yang memantau dan menyalakan ulang anak menurut
+    strategi (\texttt{:one\_for\_one}, dll). \emph{Contoh:} memulai ulang hanya anak yang gagal.
+  \item[GenServer] Abstraksi \emph{process} \emph{stateful}. \emph{Contoh:} satu sesi
+    dokumen direpresentasikan sebagai satu \texttt{GenServer}.
+  \item[Process (BEAM)] Unit eksekusi ringan BEAM, bukan \emph{process} OS.
+    \emph{Contoh:} ratusan ribu \emph{process} dalam satu VM.
+  \item[Let it crash] Filosofi membiarkan \emph{process} gagal lalu dipulihkan supervisor.
+    \emph{Contoh:} tidak menulis \emph{defensive code}, cukup biarkan \emph{crash} dan restart.
+  \item[Restart] Penyalaan ulang \emph{process} oleh supervisor setelah \emph{crash}.
+    \emph{Contoh:} \emph{decoder} yang \emph{crash} disalakan ulang otomatis.
+  \item[Restart-budget] Batas intensitas \emph{restart} (\texttt{max\_restarts} dalam
+    \texttt{max\_seconds}); bila terlampaui, supervisor menyerah dan tereskalasi ke induk.
+    \emph{Contoh:} \texttt{3} \emph{restart} dalam \texttt{5} detik.
+  \item[libcluster] Pembentukan \emph{cluster} BEAM otomatis di Kubernetes. \emph{Contoh:}
+    strategi \texttt{Kubernetes.DNS} menemukan \emph{peer} lewat \emph{headless service}.
+  \item[Horde] \emph{Supervisor}/\emph{registry} terdistribusi berbasis CRDT dengan
+    \emph{handoff}. \emph{Contoh:} memindahkan \emph{process} ke node tersisa saat node hilang.
+  \item[Handoff] Pemindahan \emph{process} beserta \emph{state}-nya ke node lain.
+    \emph{Contoh:} Horde memindahkan \emph{process} dokumen sebelum \emph{pod} mati.
+  \item[Phoenix] Kerangka kerja web Elixir. \emph{Contoh:} \emph{endpoint} HTTP pada \emph{port} 4000.
+  \item[\texttt{:global}] \emph{Registry} nama global lintas-node bawaan Erlang.
+    \emph{Contoh:} mendaftarkan \emph{singleton} agar unik di seluruh \emph{cluster}.
+  \item[CRDT] \emph{Conflict-free Replicated Data Type}---konvergen tanpa koordinasi.
+    \emph{Contoh:} Horde memakai \texttt{DeltaCrdt}.
+  \item[Erlang distribution cookie] Rahasia bersama yang harus seragam antar-node.
+    \emph{Contoh:} disuntikkan via \emph{Secret} Kubernetes.
+  \item[Kuorum BEAM] Jumlah node minimum agar satu sisi \emph{cluster} dianggap otoritatif
+    (mayoritas). \emph{Contoh:} \texttt{Horde.UniformQuorumDistribution} mematikan sisi
+    dengan kurang dari setengah node.
+\end{description}
+
+\section{Kubernetes}
+\begin{description}[style=nextline,leftmargin=1.4em]
+  \item[Kubernetes] Orkestrator kontainer yang menjadwalkan, memantau, dan memulihkan
+    beban kerja. \emph{Contoh:} me-\emph{restart pod} yang gagal \emph{probe}.
+  \item[Control plane] Otak Kubernetes (API \emph{server}, \emph{scheduler}, \emph{controller}).
+    \emph{Contoh:} menyimpan keadaan ke etcd.
+  \item[etcd] Penyimpanan \emph{key-value} konsisten (Raft), \emph{backend control plane}.
+    \emph{Contoh:} mendukung penguncian \emph{Lease}.
+  \item[Pod] Unit penyebaran terkecil (satu/lebih kontainer). \emph{Contoh:} satu \emph{pod}
+    memuat satu instans BEAM.
+  \item[Node] Mesin (fisik/VM) anggota \emph{cluster}. \emph{Contoh:} \emph{pod}
+    dijadwalkan ulang ke node sehat saat node-nya mati.
+  \item[kubelet] Agen Kubernetes di tiap node yang menjalankan \emph{probe} dan mengelola
+    siklus hidup \emph{pod}. \emph{Contoh:} kubelet mengirim \texttt{SIGTERM} saat \emph{pod} diterminasi.
+  \item[Probe] Pemeriksaan kesehatan berkala oleh kubelet (\emph{liveness}/\emph{readiness}/\emph{startup}).
+    \emph{Contoh:} \texttt{HTTP GET /healthz}.
+  \item[Liveness probe] ``Apakah kontainer hidup?''; gagal $\rightarrow$ di-\emph{restart}.
+    \emph{Contoh:} memeriksa \emph{port} 4000.
+  \item[Readiness] Keadaan ``siap menerima lalu lintas''; \emph{readiness probe} mengatur
+    keanggotaan \emph{endpoint Service}. \emph{Contoh:} \texttt{/readyz} mengembalikan 503
+    sampai \emph{cluster} terbentuk.
+  \item[Startup probe] \emph{Probe} untuk boot lambat sebelum \emph{liveness} aktif.
+    \emph{Contoh:} menunggu migrasi basis data.
+  \item[failureThreshold] Jumlah kegagalan \emph{probe} berturut-turut sebelum kontainer
+    dianggap gagal. \emph{Contoh:} \texttt{failureThreshold: 1} membunuh \emph{pod} setelah
+    satu kegagalan (positif palsu pada Masalah~1).
+  \item[Readiness gate] Kondisi \emph{pod} kustom tambahan yang memengaruhi \emph{readiness}.
+    \emph{Contoh:} siap hanya bila anggota \emph{cluster} BEAM \texttt{Up}.
+  \item[SIGTERM] Sinyal terminasi sopan yang dikirim sebelum penghentian paksa.
+    \emph{Contoh:} memicu \emph{drain} dan \emph{handoff}.
+  \item[SIGKILL] Sinyal penghentian paksa setelah \emph{grace period} habis (tak dapat
+    ditangkap). \emph{Contoh:} membunuh \emph{process} yang belum selesai \emph{handoff}.
+  \item[Graceful shutdown] Mematikan tertib: berhenti menerima koneksi, \emph{drain},
+    \emph{handoff}, lalu berhenti. \emph{Contoh:} menyelesaikan permintaan yang sedang berjalan.
+  \item[terminationGracePeriodSeconds (grace period)] Tenggat antara \texttt{SIGTERM} dan
+    \texttt{SIGKILL}. \emph{Contoh:} \texttt{30} detik.
+  \item[preStop hook] Perintah/HTTP sebelum \texttt{SIGTERM}. \emph{Contoh:} tidur sejenak
+    agar penghapusan \emph{endpoint} merambat.
+  \item[Blocking termination] Menahan penghapusan \emph{pod} (mis.\ via \emph{finalizer})
+    hingga syarat terpenuhi. \emph{Contoh:} menunda terminasi sampai \emph{handoff} Horde selesai.
+  \item[Drain / eviction] Pengosongan \emph{pod} dari node (gangguan sukarela).
+    \emph{Contoh:} \texttt{kubectl drain} saat pemeliharaan.
+  \item[Rolling update] Pembaruan bertahap yang mengganti \emph{pod} sedikit demi sedikit.
+    \emph{Contoh:} mengganti \emph{image} versi baru tanpa \emph{downtime}.
+  \item[PodDisruptionBudget (PDB)] Batas \emph{pod} yang boleh tidak tersedia saat gangguan
+    sukarela. \emph{Contoh:} \texttt{minAvailable: 2}.
+  \item[maxUnavailable] Jumlah/persentase \emph{pod} maksimum yang boleh tidak tersedia saat
+    \emph{rolling update}/PDB. \emph{Contoh:} \texttt{maxUnavailable: 1}.
+  \item[anti-affinity] Aturan penjadwalan agar \emph{pod} tidak ditempatkan berdekatan
+    (mis.\ node sama). \emph{Contoh:} menyebar replika antar-node demi ketahanan.
+  \item[backoff] Penundaan yang meningkat antar-percobaan \emph{restart}
+    (\texttt{CrashLoopBackOff}). \emph{Contoh:} jeda kian lama saat \emph{pod} terus gagal.
+  \item[Operator / Controller / CRD] Pengendali kustom yang merekonsiliasi \emph{Custom
+    Resource}. \emph{Contoh:} operator menyediakan basis data per-penyewa.
+  \item[Bonny] Kerangka menulis \emph{operator} Kubernetes dalam Elixir. \emph{Contoh:}
+    mengawasi CRD dan merekonsiliasi keadaan.
+  \item[Kubernetes Lease] Objek koordinasi (\texttt{kind: Lease}) didukung etcd untuk
+    penguncian/\emph{leader election}/\emph{fencing}. \emph{Contoh:} Akka memakainya sebagai
+    arbiter \emph{split-brain}~\cite{akkaLease}.
+  \item[KEDA / HPA] Penskala otomatis berbasis metrik/event (KEDA) dan sumber daya (HPA).
+    \emph{Contoh:} KEDA menskala dari panjang antrian Oban.
+\end{description}
+
+\section{Konsep, Evaluasi, dan Platform Lain}
+\begin{description}[style=nextline,leftmargin=1.4em]
+  \item[Chaos Mesh] Perkakas \emph{chaos engineering} Kubernetes. \emph{Contoh:}
+    \texttt{NetworkChaos} membuat partisi; \texttt{PodChaos} mematikan \emph{pod}.
+  \item[LitmusChaos] Kerangka \emph{chaos engineering} Kubernetes berbasis eksperimen.
+    \emph{Contoh:} eksperimen \texttt{pod-delete}.
+  \item[Fault injection] Penyuntikan kesalahan terkendali untuk menguji ketahanan.
+    \emph{Contoh:} mematikan node saat beban penuh.
+  \item[MAPE-K] \emph{Loop} otonomik \emph{Monitor-Analyze-Plan-Execute} di atas
+    \emph{Knowledge}. \emph{Contoh:} operator sebagai \emph{self-healing loop}.
+  \item[Split-brain] Partisi jaringan yang membuat dua sisi \emph{cluster} sama-sama aktif.
+    \emph{Contoh:} dua sisi mendaftarkan \emph{singleton} yang sama.
+  \item[Fencing] Mencegah sisi yang tidak otoritatif terus bertindak.
+    \emph{Contoh:} hanya pemegang \emph{Lease} yang boleh bertahan.
+  \item[Arbiter] Pihak eksternal yang memutuskan sisi mana yang otoritatif saat
+    konflik/partisi. \emph{Contoh:} \emph{Kubernetes Lease} (etcd) menjadi \emph{arbiter}
+    \emph{split-brain} pada M5.
+  \item[Double recovery] Dua lapis memulihkan satu kegagalan secara mubazir.
+    \emph{Contoh:} OTP me-\emph{restart} \emph{process} sembari K8s me-\emph{restart pod}.
+  \item[Drift (konfigurasi)] Divergensi pengaturan antar sumber/lapis yang seharusnya
+    konsisten. \emph{Contoh:} \emph{probe} K8s dan \texttt{max\_restarts} OTP tak sinkron.
+  \item[MTTR] \emph{Mean Time To Recovery}---rerata waktu pulih. \emph{Contoh:} metrik
+    utama evaluasi (Bab~\ref{ch:eval}).
+  \item[kind] \emph{Kubernetes IN Docker}---\emph{cluster} lokal untuk pengujian.
+    \emph{Contoh:} \emph{testbed} evaluasi.
+  \item[Akka / Orleans] \emph{Toolkit actor} JVM (Akka) dan kerangka \emph{virtual actor}
+    .NET (Orleans). \emph{Contoh:} Akka memantulkan keanggotaan \emph{cluster} ke
+    \emph{readiness}~\cite{akkaHealth}.
+\end{description}
+
+\section{Istilah pada Diagram (Sekuens/Aktivitas)}
+Istilah-istilah berikut muncul pada label dan catatan di dalam diagram.
+\begin{description}[style=nextline,leftmargin=1.4em]
+  \item[Cowboy / Bandit] Server HTTP untuk BEAM yang dipakai Phoenix. \emph{Contoh:}
+    Cowboy menerima koneksi TCP di \emph{port} 4000.
+  \item[Finch] Klien HTTP berbasis \emph{pool} koneksi. \emph{Contoh:} \emph{pool} Finch
+    memanggil API \emph{fraud} eksternal pada \emph{PayGate}.
+  \item[Ecto] Pustaka basis data Elixir dengan \emph{pool} koneksi. \emph{Contoh:}
+    \emph{pool} Ecto menyambung ulang saat \emph{failover} basis data.
+  \item[MatchError] Galat Elixir saat pencocokan pola gagal. \emph{Contoh:} \emph{frame}
+    cacat memicu \texttt{MatchError} pada \emph{decoder}.
+  \item[\texttt{:one\_for\_one}] Strategi supervisi: hanya anak yang gagal yang disalakan
+    ulang. \emph{Contoh:} lihat Listing~\ref{lst:sup}.
+  \item[EXIT] Sinyal yang dikirim saat \emph{process} berhenti/\emph{crash}, ditangkap
+    supervisor. \emph{Contoh:} \emph{decoder} mengirim \texttt{EXIT} ke supervisornya.
+  \item[nodedown] Peristiwa saat sebuah node distribusi terputus. \emph{Contoh:} saat
+    partisi, tiap sisi melihat sisi lain \texttt{nodedown}.
+  \item[Wedged (macet)] \emph{Process} yang hidup tetapi tak membuat kemajuan (mis.\
+    terblokir tanpa \emph{timeout}). \emph{Contoh:} pekerja \emph{pool} terblokir pada
+    koneksi yang menggantung.
+  \item[Wedged VM] Instans BEAM yang \emph{process} OS-nya hidup tetapi tak melayani
+    permintaan karena subsistem kritis terblokir. \emph{Contoh:} \emph{probe} TCP lulus
+    padahal 100\% pembayaran macet (negatif palsu pada M1/M9).
+  \item[Naive TCP probe] \emph{Probe} yang hanya memeriksa apakah \emph{port} menerima
+    koneksi TCP, tanpa menilai kesehatan aplikasi sebenarnya. \emph{Contoh:}
+    \texttt{tcpSocket: 4000} lulus meski seluruh pekerja \emph{pool} macet.
+  \item[Scheduler / utilisasi scheduler] Penjadwal BEAM yang menjalankan \emph{process};
+    utilisasinya menandakan beban nyata. \emph{Contoh:} salah satu sinyal M9.
+  \item[Run-queue] Antrian \emph{process} siap-jalan per \emph{scheduler}; yang membengkak
+    menandakan kemacetan. \emph{Contoh:} indikator kesehatan pada M9.
+  \item[Mailbox / message-queue backpressure] Antrian pesan tiap \emph{process}; backlog
+    yang tumbuh menandakan \emph{backpressure}. \emph{Contoh:} \emph{mailbox} membengkak
+    saat \emph{process} tak mengimbangi laju pesan.
+  \item[Restart intensity] Laju \emph{restart} anak oleh supervisor; lonjakannya menandakan
+    kegagalan berulang. \emph{Contoh:} dipakai M1 dan M9.
+  \item[Deroute] Mengeluarkan \emph{pod} dari \emph{Service Endpoints} sehingga lalu lintas
+    berhenti diarahkan ke sana (tanpa \emph{restart}). \emph{Contoh:} \emph{readiness} gagal
+    $\rightarrow$ \emph{pod} di-\emph{deroute}.
+  \item[Per-subtree restart intensity] Intensitas \emph{restart} dihitung per subpohon
+    supervisi, bukan secara global. \emph{Contoh:} M1 memeriksa tiap subpohon.
+  \item[Wedged-child detection] Deteksi anak supervisi yang hidup tetapi macet.
+    \emph{Contoh:} dasar vonis tidak-sehat pada M1/M9.
+  \item[Critical subtree] Subpohon supervisi yang menjalankan fungsi penting;
+    kemacetan/over-\emph{restart}-nya menentukan vonis \emph{probe}. \emph{Contoh:} M1.
+  \item[Up/down (status anak)] Keadaan anak supervisi hidup (\emph{up}) atau mati
+    (\emph{down}). \emph{Contoh:} dimasukkan ke perhitungan kesehatan M1.
+  \item[\texttt{/healthz} (derived)] \emph{Endpoint} \emph{healthz} yang vonisnya diturunkan
+    dari keadaan \emph{supervision tree} (M1), bukan pemeriksaan dangkal, sehingga Kubernetes
+    bertindak (\emph{deroute}/\emph{restart}) atas kesehatan supervisi yang sebenarnya.
+  \item[Health deriver] Komponen M1 yang memeriksa \emph{OTP supervision tree} dan menghitung
+    vonis \emph{probe}. \emph{Contoh:} memetakan intensitas \emph{restart}/kemacetan subpohon
+    menjadi balasan 200 atau 503.
+  \item[Fault rate] Laju kegagalan teramati per satuan waktu, menjadi masukan adaptasi M8.
+    \emph{Contoh:} lonjakan \emph{crash} \emph{decoder} menaikkan \emph{fault rate}.
+  \item[Adaptive budget] Penyetelan dinamis jatah \emph{restart}
+    (\texttt{max\_restarts}/\texttt{max\_seconds}) menurut kondisi, bukan nilai statis.
+    \emph{Contoh:} jatah diperketat saat \emph{fault rate} tinggi.
+  \item[\texttt{f(rate, history)}] Fungsi adaptasi yang memetakan \emph{fault rate} dan
+    riwayat ke jatah \emph{restart} baru. \emph{Contoh:} inti \textsc{AdaptBudget} pada
+    Algoritma~\ref{alg:m8}.
+  \item[Child crash] Peristiwa anak supervisor berhenti tak normal. \emph{Contoh:} memicu
+    evaluasi apakah masih dalam jatah \emph{restart}.
+  \item[Escalate (eskalasi)] Menyerahkan kegagalan ke lapis di atas
+    (anak~$\rightarrow$~supervisor~$\rightarrow$~VM~$\rightarrow$~Kubernetes). \emph{Contoh:}
+    jatah habis $\Rightarrow$ VM keluar $\Rightarrow$ K8s me-\emph{restart pod}.
+  \item[Boundary (batas kepemilikan)] Ambang yang memisahkan ``OTP menangani'' dari ``K8s
+    me-\emph{restart pod}''. \emph{Contoh:} ditetapkan secara adaptif oleh M8.
+  \item[Principled \& load-adaptive] Sifat batas eskalasi: berlandas prinsip/terukur dan
+    menyesuaikan beban, bukan konstanta sembarang. \emph{Contoh:} batas OTP$\leftrightarrow$K8s pada M8.
+  \item[Signal aggregator] Komponen M9 yang merangkum sinyal runtime BEAM menjadi satu
+    skor. \emph{Contoh:} menggabungkan \emph{scheduler}, \emph{run-queue}, dan \emph{mailbox}.
+  \item[Sinyal liveness komposit BEAM] Sinyal kesehatan M9 yang menggabungkan beberapa
+    metrik runtime BEAM (\emph{scheduler}, \emph{run-queue}, \emph{mailbox}, \emph{restart
+    intensity}) menjadi satu vonis \emph{liveness}, menggantikan \emph{probe} TCP/HTTP.
+    \emph{Contoh:} keluaran \emph{signal aggregator} pada \texttt{/alive}.
+  \item[Composite progress score] Skor kesehatan gabungan dari beberapa sinyal; di bawah
+    ambang berarti tidak sehat. \emph{Contoh:} keluaran \emph{signal aggregator} M9.
+  \item[/alive (composite)] \emph{Endpoint} \emph{liveness} yang melayani skor komposit,
+    bukan sekadar \emph{probe} TCP. \emph{Contoh:} dipakai M9 menggantikan \emph{probe} naif.
+  \item[\texttt{terminate/2}, \texttt{handle\_continue/2}] \emph{Callback} OTP untuk
+    menyimpan \emph{state} saat berhenti dan memulihkannya setelah inisialisasi.
+    \emph{Contoh:} \emph{handoff} Horde menyimpan \emph{state} via \texttt{terminate/2}.
+  \item[Phoenix.PubSub] \emph{Pub/sub} terdistribusi lintas-node. \emph{Contoh:} menyiarkan
+    pesan ke semua pengguna antar-\emph{pod}.
+  \item[Service / Endpoints] Abstraksi K8s yang merutekan lalu lintas ke \emph{pod} siap;
+    daftar \emph{Endpoints} berisi \emph{pod} anggota. \emph{Contoh:} \emph{pod} ditambahkan
+    ke \emph{Endpoints} saat \emph{ready}.
+  \item[Deployment / ReplicaSet] Pengendali K8s yang menjaga jumlah replika dan melakukan
+    \emph{rolling update}. \emph{Contoh:} Deployment mengganti \emph{pod} secara bertahap.
+  \item[Voluntary disruption (gangguan sukarela)] Gangguan yang dipicu operator
+    (\emph{drain}, \emph{rolling update}, \emph{scale-in})---bukan kegagalan---yang dibatasi
+    PDB. \emph{Contoh:} \texttt{kubectl drain} saat pemeliharaan node.
+  \item[Cluster change] Perubahan keanggotaan \emph{cluster} (node bergabung/keluar) yang
+    memicu perhitungan ulang PDB/kuorum pada M7. \emph{Contoh:} node baru
+    $\rightarrow$ hitung ulang \texttt{minAvailable}.
+  \item[minAvailable] Parameter PDB: jumlah/persentase \emph{pod} minimum yang harus tetap
+    tersedia. \emph{Contoh:} \texttt{minAvailable} disetel sama dengan kuorum BEAM.
+  \item[Allow / block eviction] Keputusan API saat permintaan pengusiran \emph{pod}:
+    \emph{allow} bila PDB terpenuhi, \emph{block} bila melanggar kuorum. \emph{Contoh:}
+    logika M7.
+  \item[Handoff throughput] Laju Horde memindahkan \emph{process}/\emph{state} per satuan
+    waktu; membatasi berapa \emph{pod} boleh \emph{down} serentak. \emph{Contoh:}
+    \texttt{maxUnavailable} diturunkan darinya.
+  \item[Handoff backlog] Jumlah \emph{process}/\emph{state} yang masih menunggu di-\emph{handoff}.
+    \emph{Contoh:} masukan M3 untuk menghitung \emph{grace}.
+  \item[libcluster convergence] Waktu sampai libcluster menemukan seluruh \emph{peer} dan
+    \emph{cluster} stabil. \emph{Contoh:} M3 menambahkannya ke perhitungan \emph{grace}.
+  \item[In-flight work] Permintaan/tugas yang sedang diproses saat \emph{shutdown} dimulai.
+    \emph{Contoh:} harus di-\emph{drain}/diselesaikan sebelum berhenti.
+  \item[Required grace] \emph{Grace period} minimum agar \emph{handoff} dan \emph{drain}
+    tuntas, dihitung M3. \emph{Contoh:} $\max(\textit{backlog}/\textit{throughput},\ \textit{convergence},\ g_{\min})$.
+  \item[Rollout pace] Laju penggantian \emph{pod} saat \emph{rolling update}, diatur
+    \texttt{maxUnavailable}. \emph{Contoh:} diperlambat M3 bila \emph{handoff} melambat.
+  \item[One fault $\rightarrow$ one recovery authority] Prinsip M2: tiap kegagalan ditangani
+    tepat oleh satu lapis (OTP \emph{atau} Kubernetes), mencegah \emph{double recovery}.
+    \emph{Contoh:} kegagalan \emph{process} dimiliki OTP; matinya node dimiliki Kubernetes.
+  \item[Failure classifier / ownership policy] Komponen M2 yang mengklasifikasikan kelas
+    kegagalan lalu menerapkan kebijakan kepemilikan untuk memutuskan lapis pemulihan.
+    \emph{Contoh:} mengklasifikasi \emph{transient}/\emph{resource}/\emph{node} dan
+    mengarahkan ke OTP atau Kubernetes.
+  \item[Fault event] Peristiwa kegagalan (\emph{crash}, \texttt{EXIT}, galat dependensi)
+    yang memicu pengklasifikasi M2. \emph{Contoh:} sinyal \emph{crash} \emph{process} masuk
+    ke \emph{failure classifier}.
+  \item[\texttt{:global}/Horde quorum] Kuorum yang harus dipertahankan agar \texttt{:global}
+    dan Horde tetap otoritatif. \emph{Contoh:} gangguan sukarela tak boleh memutusnya.
+  \item[BEAM metrics] Metrik runtime BEAM (utilisasi \emph{scheduler}, \emph{run-queue},
+    \emph{mailbox}, \emph{restart intensity}) yang diekspor untuk \emph{probe} atau
+    penskalaan. \emph{Contoh:} sumber sinyal M9 dan KEDA.
+  \item[CrashLoopBackOff] Status \emph{pod} K8s saat kontainer berulang gagal mulai; jeda
+    \emph{backoff} meningkat tiap percobaan. \emph{Contoh:} eskalasi M2/M8 tampak sebagai
+    CrashLoopBackOff.
+  \item[Quorum controller] Komponen M7 yang menghitung kuorum dan kapasitas \emph{handoff}
+    lalu menyetel PDB. \emph{Contoh:} menetapkan \texttt{minAvailable} = \emph{quorum threshold}.
+  \item[Cluster size] Jumlah node anggota \emph{cluster} BEAM saat ini. \emph{Contoh:}
+    masukan untuk menghitung kuorum.
+  \item[Quorum threshold] Ambang minimum node agar kuorum terpenuhi (mis.\ mayoritas).
+    \emph{Contoh:} $\lfloor n/2 \rfloor + 1$.
+  \item[K8s API (API server)] Antarmuka \emph{control plane} Kubernetes untuk membaca/mengubah
+    objek. \emph{Contoh:} \emph{operator} menulis PDB lewat K8s API.
+  \item[Eviction / drain API] API Kubernetes untuk mengusir/mengosongkan \emph{pod} yang
+    menghormati PDB. \emph{Contoh:} \emph{drain} memanggil \emph{Eviction API} yang dapat
+    ditolak PDB.
+  \item[Cross-layer policy (kebijakan lintas-lapis)] Kebijakan pemulihan yang konsisten di
+    kedua lapis (supervisi OTP dan manifes Kubernetes), idealnya dari satu sumber kebenaran.
+    \emph{Contoh:} M6 mengompilasi satu spesifikasi menjadi kebijakan yang konsisten
+    \emph{by construction}.
+  \item[K8s manifest (manifes K8s)] Berkas deklaratif (YAML) yang mendefinisikan objek
+    Kubernetes (\emph{Deployment}, \emph{Service}, PDB, \emph{probe}). \emph{Contoh:} M6
+    membangkitkan manifes lengkap dengan \emph{probe}, PDB, \emph{grace}, dan \emph{anti-affinity}.
+  \item[Change the spec once (ubah spesifikasi sekali)] Prinsip M6: mengubah satu
+    spesifikasi sumber memicu pembangkitan ulang kedua lapis sehingga mencegah \emph{drift}.
+    \emph{Contoh:} ubah strategi pemulihan di satu tempat $\rightarrow$ spesifikasi OTP dan
+    manifes K8s diperbarui serempak.
+  \item[Single FT spec (spesifikasi FT tunggal)] Satu berkas spesifikasi \emph{fault
+    tolerance} deklaratif (sifat \emph{stateful}, strategi pemulihan, kuorum, \emph{timing})
+    yang menjadi sumber kebenaran tunggal pada M6; pengembang \emph{menulis}-nya sekali
+    (\emph{author single FT spec}) lalu ia dikompilasi ke spesifikasi OTP dan manifes K8s.
+    \emph{Contoh:} satu deklarasi menggantikan konfigurasi terpisah di kedua lapis.
+  \item[ClusterMembershipCheck] Pemeriksaan \emph{readiness} Akka berbasis keanggotaan
+    \emph{cluster}~\cite{akkaHealth}. \emph{Contoh:} \emph{pod} siap hanya bila anggotanya \texttt{Up}.
+  \item[BEAM operator (Bonny)] \emph{Operator} Kubernetes yang ditulis dalam Elixir memakai
+    Bonny dan sadar keanggotaan \emph{cluster} BEAM (Horde/distribusi Erlang). \emph{Contoh:}
+    M4 memantulkan keanggotaan ke \emph{readiness} dan menahan terminasi \emph{pod}.
+  \item[Supervision-awareness] Sifat M4: \emph{readiness}/\emph{probe} diturunkan dari keadaan
+    \emph{supervision tree}, bukan sekadar keanggotaan datar. \emph{Contoh:} subpohon kritis
+    yang macet membuat \emph{pod} ditandai tidak siap.
+  \item[Handoff-blocking termination] Menahan terminasi \emph{pod} (via \emph{finalizer}/\emph{preStop})
+    hingga \emph{handoff} Horde selesai. \emph{Contoh:} bagian M4 yang baru bagi BEAM.
+  \item[Erlang distribution] Protokol bawaan yang menghubungkan node BEAM menjadi
+    \emph{cluster} (koneksi node, pemantauan, \texttt{:global}, peristiwa \texttt{nodedown}).
+    \emph{Contoh:} libcluster membentuknya; M4 mengawasi keanggotaannya.
+  \item[lease-majority] Strategi \emph{Split Brain Resolver} Akka yang memakai
+    \emph{Kubernetes Lease} sebagai arbiter~\cite{akkaSBR}. \emph{Contoh:} hanya sisi pemegang
+    \emph{lease} yang bertahan.
+  \item[compare-and-swap / etcd CAS] Operasi atomik pada etcd yang menjamin hanya satu
+    penulis berhasil; mendasari pengambilan \emph{Kubernetes Lease} (\emph{K8s lease}).
+    \emph{Contoh:} saat partisi, hanya satu sisi memenangkan \emph{etcd CAS} dan memegang
+    \emph{lease}.
+  \item[Keeps singletons (mempertahankan singleton)] Sisi otoritatif (pemegang \emph{lease})
+    terus menjalankan \emph{singleton}-nya tanpa gangguan. \emph{Contoh:} partisi pemenang
+    tetap memegang papan peringkat.
+  \item[Fences itself (mem-fence diri)] Sisi yang kalah \emph{lease} menghentikan dirinya
+    agar tak bertindak otoritatif. \emph{Contoh:} partisi minoritas berhenti menjalankan
+    \emph{singleton}-nya.
+  \item[Stops minority / no duplicate] Menghentikan sisi minoritas sehingga hanya satu
+    instans \emph{singleton} yang aktif---mencegah duplikat dan \emph{last-writer-wins}.
+    \emph{Contoh:} hasil \emph{fencing} pada M5.
+  \item[PromEx / Prometheus] PromEx mengekspor metrik Elixir; Prometheus mengikis dan
+    menyimpannya~\cite{keda}. \emph{Contoh:} metrik \emph{run-queue} diekspor untuk penskalaan.
+\end{description}

@@ -1,0 +1,221 @@
+% problems.tex — \input dari report.tex
+\chapter{Permasalahan Koordinasi}
+\label{ch:problems}
+
+Karena kedua lapis pemulihan beroperasi pada granularitas berbeda dan tidak berbicara
+secara baku, interaksinya memunculkan lima \emph{titik gesekan}. Setiap masalah disajikan
+dengan: konteks skenario, diagram \emph{sekuens} (pertukaran pesan antar-komponen),
+diagram \emph{aktivitas} (alur keputusan), pseudokode, lalu pembahasan yang menelusuri
+ketiganya. Warna merah menandai jalur kegagalan, hijau menandai jalur yang diinginkan.
+Tiap masalah dikonkretkan dengan aplikasi \emph{ilustratif} yang sengaja
+direka---\emph{PayGate}, \emph{SensorHub}, \emph{ArenaServer}, \emph{CoEdit}, dan
+\emph{TopScore}---bukan produk nyata, melainkan contoh hipotetis untuk membumikan
+persoalan.
+
+\section{Ketidakcocokan Granularitas \emph{Liveness}}
+\label{sec:p1}
+Layanan \emph{webhook} pembayaran \emph{PayGate} menilai tiap transaksi melalui API
+penilai \emph{fraud} eksternal lewat \emph{pool} Finch---pustaka klien HTTP Elixir yang
+mengelola sekumpulan koneksi keluar yang dipakai ulang. Ketika API tersebut menggantung
+(TCP setengah terbuka, tanpa \emph{timeout}), seluruh pekerja \emph{pool} terblokir dan
+semua permintaan macet, tetapi \emph{listener} Cowboy---server HTTP Phoenix yang menerima
+koneksi pada \emph{port}---tetap meng-\emph{accept} \emph{socket} sehingga \emph{probe} TCP
+lulus dan Kubernetes mengira \emph{pod} sehat. Sebaliknya, \emph{probe} yang terlalu agresif
+justru membunuh VM yang sebenarnya akan dipulihkan OTP.
+
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{01-liveness-mismatch-sequence}
+  \caption{Masalah 1 (sekuens): jalur sebuah permintaan ke \emph{PayGate}. Cowboy tetap
+  menerima koneksi TCP dan pekerja Finch terblokir pada API \emph{fraud} yang menggantung;
+  karena \emph{probe} hanya menguji penerimaan \emph{socket}, ia lulus meski 100\%
+  pembayaran macet.}\label{fig:p1-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{01-liveness-mismatch-activity}
+  \caption{Masalah 1 (aktivitas): dua mode kegagalan rancangan \emph{probe}. \emph{Probe}
+  dangkal melewatkan subsistem yang macet (negatif palsu); \emph{probe} agresif dengan
+  \texttt{failureThreshold} rendah membunuh VM yang sebenarnya dapat dipulihkan OTP
+  (positif palsu).}\label{fig:p1-act}\end{figure}
+\begin{algorithm}[H]\caption{Masalah 1 --- \emph{probe} TCP naif.}\label{alg:p1}
+\begin{algorithmic}[1]
+\Function{NaiveProbe}{}
+  \If{\Call{TcpAccept}{\textit{port}}} \State \Return \textit{HEALTHY} \Comment{meski \emph{pool} macet} \EndIf
+\EndFunction
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:p1-seq}) menelusuri satu
+transaksi: \emph{Client}~$\rightarrow$~Cowboy~$\rightarrow$~Finch~$\rightarrow$~API
+\emph{fraud}, lalu API menggantung sehingga pekerja tak pernah dibebaskan. Pesan
+\emph{probe} dari kubelet yang datang sesudahnya tetap dibalas ``\emph{ACK}'' oleh Cowboy
+karena penerimaan \emph{socket} berada di jalur yang berbeda dari \emph{pool} yang macet.
+Diagram aktivitas (Gambar~\ref{fig:p1-act}) memisahkan persoalan menjadi dua cabang
+keputusan rancangan: cabang ``\emph{probe} dangkal'' berhenti pada ``\emph{port} terbuka?''
+sehingga melewatkan kemacetan internal, sedangkan cabang ``\emph{probe} agresif'' bercabang
+pada \texttt{failureThreshold} yang terlalu kecil dan mematikan VM saat gangguan sesaat.
+Algoritma~\ref{alg:p1} memformalkan akarnya: vonis \textit{HEALTHY} pada baris~2 hanya
+bergantung pada \textsc{TcpAccept}, tanpa sama sekali menyentuh keadaan \emph{pool} pekerja
+atau \emph{supervision tree}---inilah celah semantik yang ditutup M1 dan M9.
+
+\section{Pemulihan Ganda}
+\label{sec:p2}
+Pada \emph{ingester} telemetri IoT \emph{SensorHub}, sebuah \emph{frame} cacat membuat
+\emph{decoder}---sebuah \texttt{GenServer} (proses \emph{stateful} Elixir)---terus
+\emph{crash}. Bila \texttt{max\_restarts} (jatah \emph{restart} yang dipantau supervisor)
+terlalu longgar,
+\emph{process} ber-\emph{crash-loop} tanpa terlihat oleh Kubernetes; bila diatur wajar,
+habisnya jatah \emph{restart} mengeskalasikan kegagalan ke Kubernetes (\emph{CrashLoopBackOff})
+secara sengaja.
+
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{02-double-recovery-sequence}
+  \caption{Masalah 2 (sekuens): perangkat mengirim ulang \emph{frame} cacat sehingga
+  \emph{decoder} \emph{crash} berulang. Bila jatah \emph{restart} longgar, \emph{loop}
+  tak terlihat oleh Kubernetes; bila wajar, supervisor menghentikan diri dan VM keluar
+  sehingga Kubernetes mengambil alih.}\label{fig:p2-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{02-double-recovery-activity}
+  \caption{Masalah 2 (aktivitas): batas eskalasi kepemilikan. Selama dalam jatah, OTP
+  yang memulihkan; saat jatah habis, kepemilikan berpindah ke Kubernetes.}\label{fig:p2-act}\end{figure}
+\begin{algorithm}[H]\caption{Masalah 2 --- pemulihan tak terkoordinasi.}\label{alg:p2}
+\begin{algorithmic}[1]
+\Procedure{OnCrash}{\textit{child}}
+  \State \Call{OTP.Restart}{\textit{child}} \Comment{max\_restarts longgar $\Rightarrow$ loop tak terlihat}
+  \State \textbf{// VM tetap hidup; Kubernetes tidak diberi tahu}
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:p2-seq}) memperlihatkan
+\emph{loop} berulang \emph{Device}~$\rightarrow$~\emph{Decoder}~$\rightarrow$~Supervisor:
+perangkat mengirim ulang \emph{frame} yang sama, \emph{decoder} \emph{crash}, supervisor
+menyalakannya ulang, lalu siklus berputar. Pada cabang ``jatah longgar'', tidak ada satu
+pun pesan yang mengalir ke Kubernetes---itulah sebabnya kegagalan menjadi tak terlihat.
+Diagram aktivitas (Gambar~\ref{fig:p2-act}) menempatkan keputusan kunci pada ``apakah
+intensitas \emph{restart} melampaui jatah?''; selama \emph{tidak}, OTP yang memiliki
+kegagalan, dan begitu \emph{ya}, kepemilikan berpindah ke Kubernetes melalui keluarnya VM.
+Algoritma~\ref{alg:p2} sengaja ditulis ``naif'': baris~2 selalu me-\emph{restart} tanpa
+memeriksa jatah, dan komentar baris~3 menyorot bahwa lapis orkestrator tak pernah
+diberi tahu---persis ketiadaan kebijakan kepemilikan yang ditangani M2.
+
+\section{\emph{Readiness} vs.\ Pembentukan \emph{Cluster}}
+\label{sec:p3}
+Pada \emph{backend} permainan \emph{ArenaServer}, tiap pertandingan adalah \emph{singleton}
+global yang dikelola Horde (\emph{registry}/\emph{supervisor} terdistribusi dengan
+\emph{handoff}). Saat \emph{rolling deploy}, sebuah \emph{pod} baru ditandai siap (hanya
+karena \emph{port} terbuka) sebelum libcluster (pembentuk \emph{cluster} BEAM) menemukan
+\emph{peer} dan Horde tersinkron;
+lalu lintas tiba terlalu dini dan \emph{registry} masih kosong.
+
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{03-readiness-cluster-sequence}
+  \caption{Masalah 3 (sekuens): \emph{pod} menandai diri siap segera setelah \emph{port}
+  terbuka, lalu Kubernetes merutekan permintaan pemain sebelum Horde tersinkron sehingga
+  pencarian \emph{singleton} menemui \emph{registry} kosong.}\label{fig:p3-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{03-readiness-cluster-activity}
+  \caption{Masalah 3 (aktivitas): perbandingan kebijakan \emph{gating readiness}---``\emph{port}
+  terbuka'' (terlalu dini) vs.\ ``\emph{cluster} tergabung dan Horde konvergen''
+  (benar).}\label{fig:p3-act}\end{figure}
+\begin{algorithm}[H]\caption{Masalah 3 --- \emph{readiness} terlalu dini.}\label{alg:p3}
+\begin{algorithmic}[1]
+\Procedure{OnPodStart}{}
+  \State \Call{BindPort}{4000}; \Call{MarkReady}{} \Comment{libcluster/Horde belum konvergen}
+\EndProcedure
+\Procedure{OnRequest}{\textit{match}}
+  \State \Call{Lookup}{\textit{match}} \Comment{$\rightarrow$ notFound / duplikat}
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:p3-seq}) menyusun urutan
+waktu yang kritis: \emph{pod} mengikat \emph{port}, kubelet mengirim \emph{probe} TCP yang
+langsung lulus, Kubernetes menambahkan \emph{pod} ke \emph{Endpoints}, lalu permintaan
+pemain tiba---semua \emph{sebelum} pesan penemuan libcluster dan sinkronisasi Horde
+selesai. Diagram aktivitas (Gambar~\ref{fig:p3-act}) mengontraskan dua kebijakan
+\emph{gating}: jalur ``\emph{port} terbuka'' langsung menandai siap, sedangkan jalur yang
+benar menunggu syarat gabungan ``\emph{cluster} tergabung \emph{dan} Horde konvergen''.
+Algoritma~\ref{alg:p3} memisahkan dua prosedur: \textsc{OnPodStart} (baris~2) menandai
+siap segera setelah \textsc{BindPort}, sementara \textsc{OnRequest} (baris~5) melakukan
+\textsc{Lookup} yang mengembalikan \emph{notFound} atau bahkan mendaftarkan \emph{singleton}
+duplikat---akibat langsung dari penandaan siap yang prematur, yang diperbaiki M4.
+
+\section{Churn \emph{Rolling-Deploy}: \emph{Handoff} vs.\ \emph{Grace Period}}
+\label{sec:p4}
+Pada editor kolaboratif \emph{CoEdit}, tiap dokumen adalah \emph{process} \emph{stateful}
+ber-CRDT (\emph{conflict-free replicated data type}---struktur data yang konvergen tanpa
+koordinasi) yang di-\emph{handoff} via Horde. Ketika \texttt{SIGTERM} tiba, \emph{handoff}
+ratusan \emph{process} memerlukan waktu lebih lama daripada
+\texttt{terminationGracePeriodSeconds}; saat \texttt{SIGKILL} datang, dokumen yang belum
+berpindah mati bersama suntingan yang belum tersinkron.
+
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{04-rolling-deploy-sequence}
+  \caption{Masalah 4 (sekuens): setelah \texttt{SIGTERM}, \emph{pod} men-\emph{drain} dan
+  memulai \emph{handoff} 400 \emph{process}; karena \emph{handoff} ($\approx$45\,s)
+  melampaui \emph{grace} (30\,s), \texttt{SIGKILL} memutus sisanya dan state hilang.}\label{fig:p4-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{04-rolling-deploy-activity}
+  \caption{Masalah 4 (aktivitas): perlombaan antara penyelesaian \emph{drain}/\emph{handoff}
+  dan tenggat \emph{grace period}; bila tenggat menang, terjadi kehilangan state.}\label{fig:p4-act}\end{figure}
+\begin{algorithm}[H]\caption{Masalah 4 --- \emph{handoff} melampaui \emph{grace}.}\label{alg:p4}
+\begin{algorithmic}[1]
+\Procedure{OnSigterm}{}
+  \State \Call{StartGraceTimer}{30}
+  \For{$p \in \{400\ \text{proc}\}$} \State \Call{Handoff}{$p$} \Comment{$\approx$45 s} \EndFor
+  \If{\textbf{not} \Call{Done}{} \textbf{before} \textit{deadline}} \State \Call{Sigkill}{} \Comment{state hilang} \EndIf
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:p4-seq}) menelusuri jalur
+terminasi: \emph{Deployment}~$\rightarrow$~kubelet mengirim \texttt{SIGTERM}, \emph{pod}
+men-\emph{drain} \emph{endpoint} lalu mengalirkan 400 perintah \emph{handoff} ke node
+tersisa; sebuah pesan \texttt{SIGKILL} terjadwal di $t{=}30$\,s memotong aliran yang baru
+mencapai $\approx$45\,s. Diagram aktivitas (Gambar~\ref{fig:p4-act}) memodelkan ini sebagai
+perlombaan: percabangan ``\emph{handoff} selesai sebelum tenggat?'' menentukan apakah
+keluar bersih atau \texttt{SIGKILL}. Algoritma~\ref{alg:p4} memperjelas ketakcocokan
+waktu: baris~2 memulai pewaktu 30\,s, perulangan baris~3 melakukan 400 \emph{handoff}
+yang totalnya $\approx$45\,s, dan kondisi baris~4 memicu \textsc{Sigkill} begitu tenggat
+terlewati---ketiadaan kopling antara durasi \emph{handoff} dan \emph{grace} inilah yang
+dijembatani M3.
+
+\section{\emph{Split-Brain}}
+\label{sec:p5}
+Pada papan peringkat \emph{TopScore}, partisi jaringan memecah \emph{cluster}; tiap sisi
+melihat sisi lain sebagai \emph{nodedown} (node distribusi yang terputus) dan mendaftarkan
+ulang \emph{singleton}-nya (proses unik se-\emph{cluster} via \texttt{:global}),
+sementara semua \emph{probe} lokal Kubernetes tetap lulus. Saat partisi pulih, resolusi
+konflik membunuh salah satu duplikat dan membuang akumulasi datanya.
+
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{05-split-brain-sequence}
+  \caption{Masalah 5 (sekuens): partisi memecah \emph{cluster} menjadi dua sisi yang
+  sama-sama melayani; \emph{probe} per-\emph{pod} semuanya lulus sehingga Kubernetes tak
+  bertindak, lalu resolusi konflik saat pulih membuang state satu duplikat.}\label{fig:p5-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{05-split-brain-activity}
+  \caption{Masalah 5 (aktivitas): siklus \emph{split-brain}---kedua sisi berlanjut dan
+  mendaftarkan \emph{singleton}, lalu satu duplikat dibunuh saat pulih (state hilang).}\label{fig:p5-act}\end{figure}
+\begin{algorithm}[H]\caption{Masalah 5 --- \emph{split-brain} dan resolusi merusak.}\label{alg:p5}
+\begin{algorithmic}[1]
+\Procedure{OnPartition}{}
+  \State tiap sisi: lihat sisi lain \textit{nodedown}; \Call{Register}{\textit{singleton}}
+  \State \textbf{// probe lokal K8s semua lulus $\Rightarrow$ tak bertindak}
+\EndProcedure
+\Procedure{OnHeal}{}
+  \State \Call{Global.ResolveConflict}{} \Comment{bunuh duplikat $\rightarrow$ state hilang}
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:p5-seq}) memperlihatkan
+dua kelompok \emph{pod} (Partisi~A dan~B) yang, setelah tautan putus, masing-masing
+menganggap sisi lain \emph{nodedown} dan terus melayani; di jalur paralel, \emph{probe}
+kubelet ke tiap \emph{pod} tetap lulus karena bersifat lokal. Diagram aktivitas
+(Gambar~\ref{fig:p5-act}) menyusun siklus hidupnya: dari operasi normal, masuk ke dua
+cabang yang sama-sama mendaftarkan \emph{singleton}, lalu menyatu kembali pada peristiwa
+\emph{heal}. Algoritma~\ref{alg:p5} memisahkan dua fase: \textsc{OnPartition} (baris~2--3)
+menunjukkan kedua sisi mendaftar dan Kubernetes diam; \textsc{OnHeal} (baris~5) memanggil
+\textsc{Global.ResolveConflict} yang membunuh satu duplikat sehingga state-nya hilang.
+Ketidaksepakatan antara model kesehatan orkestrator (semua hijau) dan model keanggotaan
+BEAM (terpecah) inilah yang menjadi sasaran M5.
+
+\section{Pertanyaan Penelitian}
+\label{sec:rq}
+\begin{description}[leftmargin=2.6em,style=sameline,nosep]
+  \item[RQ1] Komunikasi BEAM$\leftrightarrow$Kubernetes apa yang diperlukan, dan bagaimana
+        ia diwujudkan dalam praktik?
+  \item[RQ2] Ragam kegagalan apa yang muncul dari interaksi toleransi kesalahan lapis-OTP
+        dan lapis-Kubernetes?
+  \item[RQ3] Bagaimana dampak toleransi kesalahan berlapis terhadap waktu pemulihan,
+        ketersediaan, dan konsistensi state dibandingkan \emph{baseline} satu lapis?
+  \item[RQ4] Dapatkah mekanisme koordinasi eksplisit meningkatkan keandalan dibanding
+        konfigurasi baku/\emph{ad hoc}?
+  \item[RQ5] Kapan pemulihan sebaiknya dimiliki runtime vs.\ orkestrator, dan apakah
+        temuannya berlaku umum di luar Elixir?
+\end{description}

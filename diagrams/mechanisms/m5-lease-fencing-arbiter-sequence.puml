@@ -1,0 +1,22 @@
+@startuml m5-lease-fencing-arbiter-sequence
+skinparam dpi 300
+title M5 — K8s Lease / etcd as Split-Brain Fencing Arbiter
+
+box "Partition A" #f0f8ff
+participant "node A" as A
+end box
+box "Partition B" #fff0f0
+participant "node B" as B
+end box
+participant "K8s Lease\n(etcd CAS)" as L
+
+note over A,B: network partition
+A -> L: acquire lease
+B -> L: acquire lease
+L --> A: GRANTED
+L --> B: DENIED
+note over A #ccffcc: remains authoritative\n(keeps singletons)
+note over B #ccffcc: fences itself\n(stops minority, no duplicate)
+== heal ==
+A -> B: reconnect; single authority resumes
+@enduml

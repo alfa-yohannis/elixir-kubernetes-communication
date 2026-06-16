@@ -1,0 +1,35 @@
+@startuml 05-split-brain-activity
+skinparam dpi 300
+title Problem 5 — Split-Brain Lifecycle (TopScore)
+
+start
+:single :global leaderboard singleton\n(healthy 4-node cluster);
+if (network partition?) then (yes)
+  fork
+    partition "Partition A {pod-1,2}" {
+      :keeps existing singleton;
+      :accumulates scores;
+    }
+  fork again
+    partition "Partition B {pod-3,4}" {
+      :no singleton visible;
+      :re-registers a new singleton;
+      :accumulates scores;
+    }
+  end fork
+  :partition heals -> nodes reconnect;
+  :":global" detects name clash;
+  #ffcccc:conflict resolver kills one duplicate\nits accumulated scores discarded;
+  stop
+else (no)
+  :normal operation;
+  stop
+endif
+
+legend right
+  Throughout the split, every pod's local
+  liveness/readiness probe passes - K8s reports
+  all-green and never acts.
+  Orchestrator health model != BEAM membership.
+endlegend
+@enduml

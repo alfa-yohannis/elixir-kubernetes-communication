@@ -1,0 +1,24 @@
+@startuml m8-adaptive-restart-budget-activity
+skinparam dpi 300
+title M8 — Adaptive OTP <-> K8s Escalation Boundary
+
+start
+:observe fault rate / class;
+:adapt budget = f(rate, history);
+repeat
+  :child crashes;
+  if (within adaptive budget?) then (yes)
+    #ccffcc:OTP restarts locally;
+  else (no)
+    #ccffcc:escalate: VM exits -> K8s\nrestarts pod + backoff;
+    stop
+  endif
+repeat while (more crashes?) is (yes)
+->stable;
+stop
+legend right
+  The "OTP handles it" vs "K8s restarts the pod"
+  boundary is principled and load-adaptive,
+  not a static max_restarts.
+endlegend
+@enduml

@@ -1,0 +1,142 @@
+% literature-review.tex — \input dari report.tex (berbagi bibliografi)
+\chapter{Tinjauan Pustaka}
+\label{ch:litreview}
+
+Bab ini meninjau karya terdahulu di seluruh lapis yang dijembatani dan menegakkan celah
+penelitian. Bab ini merupakan hasil konsolidasi penelusuran sistematis (lima sudut,
+24 sumber, 118 klaim diekstrak, 25 diverifikasi secara adversarial melalui voting
+mayoritas; 15 terkonfirmasi, 10 gugur). Vonis kebaruan berkeyakinan \emph{sedang}---dan
+\emph{tinggi} untuk celah inti (koordinasi) setelah verifikasi Fase~0: ketiadaan
+dalam pustaka tidak dapat dibuktikan, indeks penelusuran tunggal, satu venue penting
+(ACM~DL) berbayar, dan sepuluh verifikasi \emph{abstain} (Bagian~\ref{sec:lit-batas}). Karya
+terdekat sebaiknya diperiksa ulang di Google Scholar, DBLP, dan IEEE~Xplore sebelum
+pengiriman.
+
+\section{Sinyal Kesehatan dan Semantik \emph{Probe}}
+\label{sec:lit-health}
+Manajemen kesehatan Kubernetes bersifat \emph{poll}: orkestrator memeriksa kontainer
+secara berkala. Roberts dkk.~\cite{roberts2025}, dari komunitas keandalan BEAM,
+mengarakterisasi ini sebagai \emph{poll-based container monitoring} (PCM) yang ``memerlukan
+penyetelan cermat, dapat menurunkan ketersediaan, dan lambat mendeteksi perubahan
+kesehatan,'' lalu mengusulkan \emph{signal-based container monitoring} (SCM), yakni
+kontainer memberi sinyal proaktif ke orkestrator. SCM adalah karya terdekat untuk
+menurunkan keadaan \emph{probe} dari internal runtime (M1) dan menggantikan \emph{probe}
+TCP/HTTP dengan sinyal yang lebih kaya (M9); karena penulisnya berada di ranah Erlang/BEAM,
+karya ini wajib dikutip dan dibedakan secara langsung. Kontribusi yang masih terbuka dan
+khas BEAM: penurunan semantik \emph{probe} \emph{secara otomatis dari supervision tree} dan
+sinyal \emph{komposit} runtime.
+
+\section{Pemulihan Runtime: Terkoordinasi vs.\ Independen}
+\label{sec:lit-recovery}
+Pustaka keandalan klasik membedakan pemulihan terkoordinasi dan independen serta efek
+domino yang menyertainya~\cite{elnozahy2002}. Hal ini melandaskan persoalan ``pemulihan
+ganda'' (M2) pada teori mapan, sekaligus menegaskan bahwa unsur barunya adalah model
+\emph{delegasi kepemilikan lapis}, bukan pengamatan (klasik) bahwa pemulihan tak
+terkoordinasi itu mubazir.
+
+\section{Klastering BEAM di atas Kubernetes}
+\label{sec:lit-beam}
+Tumpukan dominan adalah libcluster~\cite{libcluster} untuk pembentukan \emph{cluster} dan
+Horde~\cite{horde} untuk \emph{supervisor}/\emph{registry} terdistribusi dengan
+\emph{handoff}. Horde berbasis CRDT sehingga \emph{eventually consistent}: ia menjamin
+ketersediaan dan toleransi partisi tetapi ``tidak dapat menjamin konsistensi.'' Secara
+baku, kedua sisi partisi tetap beroperasi; satu-satunya mitigasi bawaan adalah opsi kuorum
+yang kasar. \emph{Handoff} state pun tidak otomatis---aplikasi harus menyimpan state di
+\texttt{terminate/2} dan memulihkannya via \texttt{handle\_continue/2}, dengan
+\emph{shutdown timeout} baku nol---dan, yang krusial, tidak ada kopling ke siklus hidup
+\emph{pod} Kubernetes. Bonny~\cite{bonny} menyediakan perkakas matang untuk menulis
+\emph{operator} Kubernetes dalam Elixir, sehingga kapabilitas operator di balik M4 sudah
+ada di BEAM; yang belum ada adalah jembatan dari keanggotaan/\emph{handoff} ke
+\emph{readiness} atau terminasi \emph{pod}. Ketiadaan-ketiadaan inilah bukti utama bahwa
+M3, M4, dan M7 baru sebagai kontribusi koordinasi.
+
+\section{\emph{Split-Brain}, \emph{Fencing}, dan \emph{Control Plane} sebagai Arbiter}
+\label{sec:lit-splitbrain}
+Di JVM, \emph{Split Brain Resolver} Akka menawarkan strategi \texttt{lease-majority} yang
+didukung \emph{Kubernetes Lease}~\cite{akkaSBR,akkaLease}: hanya partisi yang berhasil
+mengambil \emph{lease} yang boleh bertahan. \emph{Lease} ini memanfaatkan kendali
+konkurensi dan konsistensi API \emph{server}/etcd, sehingga \emph{control plane} menjadi
+otoritas \emph{fencing} eksternal. Ini adalah karya terdahulu langsung bagi pemakaian
+etcd/\emph{Lease} sebagai arbiter (M5) pada \emph{actor runtime}---sehingga \textbf{M5
+bukan hal baru sebagai gagasan umum, melainkan hanya sebagai penerapan khas BEAM}, dan
+sebaiknya dilebur ke kisah generalisasi. \emph{Control plane} sendiri adalah sistem
+konsensus tereplikasi dengan batasan Byzantine yang diketahui~\cite{byzK8s}. (Pada BEAM,
+perilaku bawaan terkait adalah resolusi konflik nama gaya \emph{last-writer-wins} pada
+\texttt{:global} yang hendak digantikan M5; sejauh mana Horde kehilangan state saat pulih
+tidak terkonfirmasi---lihat Bagian~\ref{sec:lit-batas}.)
+
+\section{Pendekatan Lintas-Lapis, Otonomik, dan Formal}
+\label{sec:lit-crosslayer}
+\emph{Self-healing} orkestrasi sering dibingkai sebagai \emph{control loop} otonomik
+MAPE-K~\cite{kephart2003}. Model penyebaran \emph{cloud-native} formal menalar penanganan
+kesalahan hanya pada tingkat infrastruktur: model UCC'23~\cite{ucc23} menangani kesalahan
+lewat replikasi statis dan pengiriman ulang, serta secara eksplisit menempatkan ``cara
+runtime memulihkan diri'' di luar cakupan---menegaskan bahwa model koordinasi
+runtime-vs-orkestrator (M2, M6) dan kompilasi sumber tunggal (M6) belum terisi. Sebagai
+kontras, Nefele~\cite{nefele} mengusulkan orkestrator proses cloud yang ter-inspirasi
+\emph{supervision tree} OTP namun \emph{menggantikan} kontainer/Kubernetes alih-alih
+berkoordinasi dengannya---justru menegaskan bahwa pendekatan \emph{koordinasi} (bukan
+penggantian) inilah yang masih kosong.
+
+\section{\emph{Actor Runtime} di Kubernetes dan Asimetri Lintas-Platform}
+\label{sec:lit-actors}
+Akka Management menyediakan pemeriksaan \emph{readiness} berbasis keanggotaan
+\emph{cluster} (\texttt{ClusterMembershipCheck}) yang menandai \emph{pod} siap hanya ketika
+anggotanya mencapai status \texttt{Up}~\cite{akkaHealth}, dengan \texttt{/ready} dan
+\texttt{/alive} yang memang dirancang untuk memetakan ke \emph{probe} Kubernetes. Microsoft
+Orleans menyebar di Kubernetes dengan integrasi keanggotaan serupa~\cite{orleans}. Jadi
+jembatan \emph{keanggotaan$\rightarrow$readiness} (M4) sudah ada di sisi JVM/.NET---meski
+ditulis manual dan berbasis keanggotaan, bukan diturunkan dari \emph{supervision tree}.
+Asimetri inilah yang menjadi cerita: tumpukan JVM/Akka punya \emph{plumbing} lintas-lapis,
+tumpukan BEAM tidak, dan \emph{tak ada} platform yang memformalkan koordinasi sebagai dua
+\emph{control loop} dengan kontrak kepemilikan/\emph{handoff}.
+
+\section{Klaim yang Tidak Lolos Verifikasi}
+\label{sec:lit-batas}
+Demi kejujuran dan untuk membatasi klaim kebaruan, berikut \emph{tidak} terkonfirmasi:
+(i)~bahwa Horde membuang state duplikat saat partisi pulih (hanya ``kedua sisi berlanjut''
+yang terkonfirmasi); (ii)~bahwa Bonny \emph{tidak} menyediakan koordinasi lintas-lapis
+(tak dapat ditegaskan---hanya bahwa ia menyediakan perkakas operator umum); dan (iii)~bahwa
+demo kanonik \texttt{ex\_cluster} mengabaikan \emph{split-brain}/\emph{probe}/\emph{grace}.
+Ketiga petunjuk yang sebelumnya \emph{abstain} kini telah diverifikasi manual (Fase~0):
+\texttt{akkadotnet-healthcheck} (.NET) \emph{terkonfirmasi} memantulkan keanggotaan
+\emph{cluster} ke \emph{probe} Kubernetes---sehingga jembatan keanggotaan$\rightarrow$\emph{readiness}
+(M4) ada di JVM \emph{dan} .NET; Beamlens \emph{tidak} memiliki integrasi Kubernetes (alat
+diagnostik berbasis LLM di \emph{supervision tree}); dan Akka Coordination-Lease
+\emph{terkonfirmasi} memakai CRD (\texttt{akka.io/v1}, \emph{kind} \texttt{Lease}) di etcd
+dengan kendali konkurensi optimistik. Penelusuran Scholar/DBLP/IEEE~Xplore tidak menemukan
+protokol koordinasi OTP$\leftrightarrow$Kubernetes yang terbit, sehingga celah inti
+terkonfirmasi (keyakinan naik dari sedang ke tinggi).
+
+\section{Sintesis: Celah dan Vonis Kebaruan}
+\label{sec:lit-synth}
+Setiap \emph{primitif} yang mendasari mekanisme kandidat sudah ada---\emph{probe}, PDB, dan
+\emph{grace period} Kubernetes; klastering dan \emph{handoff} Horde; \emph{supervision
+tree} OTP; kuorum \emph{split-brain}; \emph{fencing} via \emph{Kubernetes Lease}; bahkan
+pemantauan kesehatan berbasis sinyal. Yang tidak disediakan sumber mana pun---akademik
+maupun perkakas---adalah koordinasi lapis pemulihan runtime (OTP) dan orkestrator
+(Kubernetes) sebagai dua \emph{control loop} yang saling berinteraksi dengan protokol
+kepemilikan/\emph{handoff} yang jelas. Itulah ruang putih yang dapat dipertahankan.
+Tabel~\ref{tab:verdicts} memuat vonis tiap mekanisme (lihat Bab~\ref{ch:mechanisms} untuk
+rincian rancangannya); kontribusi baru yang paling bersih adalah \textbf{M3, M7, dan M8}.
+
+\begin{table}[H]
+  \centering\small
+  \begin{tabular}{@{}cp{0.46\linewidth}l@{}}
+    \toprule
+    \# & Mekanisme & Vonis kebaruan \\
+    \midrule
+    M1 & Semantik \emph{probe} dari \emph{supervision tree} & Sebagian tercakup~\cite{roberts2025} \\
+    M2 & Delegasi kepemilikan kegagalan & Baru (model)~\cite{elnozahy2002,ucc23} \\
+    M3 & Pengendali \emph{grace}$\leftrightarrow$konvergensi$\leftrightarrow$\emph{probe} & \textbf{Baru} \\
+    M4 & \emph{Operator} sadar-BEAM + jembatan kesehatan & Terbelah; jembatan ada di Akka~\cite{akkaHealth} \\
+    M5 & Arbiter \emph{split-brain} via Lease/etcd & Sudah ada di Akka~\cite{akkaLease} (terlemah) \\
+    M6 & Satu spesifikasi $\rightarrow$ OTP + manifes K8s & Baru~\cite{ucc23} \\
+    M7 & PDB/maxUnavailable $\leftrightarrow$ kuorum BEAM & \textbf{Baru}~\cite{k8sPDB} \\
+    M8 & \emph{Restart-budget} adaptif $\leftrightarrow$ \emph{backoff} K8s & \textbf{Baru}~\cite{kephart2003} \\
+    M9 & Sinyal \emph{liveness} komposit BEAM & Sebagian tercakup~\cite{roberts2025} \\
+    \bottomrule
+  \end{tabular}
+  \caption{Mekanisme kandidat dan vonis kebaruan (keyakinan sedang).}
+  \label{tab:verdicts}
+\end{table}

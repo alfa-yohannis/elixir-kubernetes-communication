@@ -1,0 +1,23 @@
+@startuml 02-double-recovery-activity
+skinparam dpi 300
+title Problem 2 — Failure Ownership Escalation (SensorHub)
+
+start
+:decoder process crashes;
+:supervisor restarts child;
+repeat
+  :device resends bad frame;
+  :decoder crashes again;
+  :supervisor restarts child;
+repeat while (within max_restarts / max_seconds?) is (yes - keeps looping)
+->no - intensity exceeded;
+if (max_restarts configured sanely?) then (yes)
+  :supervisor terminates tree;
+  :BEAM exits non-zero;
+  #ccffcc:K8s restarts pod\n(CrashLoopBackOff + alert);
+  stop
+else (no - too permissive)
+  #ffcccc:VM stays up, crash loop hidden\nK8s sees healthy, failure festers;
+  stop
+endif
+@enduml

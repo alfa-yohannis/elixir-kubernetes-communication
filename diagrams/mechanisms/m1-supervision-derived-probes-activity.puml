@@ -1,0 +1,20 @@
+@startuml m1-supervision-derived-probes-activity
+skinparam dpi 300
+title M1 — Probe State Derived from Supervision Tree
+
+start
+:liveness/readiness probe fires;
+:sample supervision tree\n(per-subtree restart intensity,\nwedged-child detection, up/down);
+if (critical subtree over restart budget\nOR wedged?) then (yes)
+  #ccffcc:report UNHEALTHY\n(drives probe verdict);
+  :K8s deroutes / restarts;
+  stop
+else (no)
+  #ccffcc:report healthy;
+  stop
+endif
+legend right
+  Replaces a hand-written /healthz that
+  cannot see process-level supervision state.
+endlegend
+@enduml

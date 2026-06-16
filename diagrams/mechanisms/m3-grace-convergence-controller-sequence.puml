@@ -1,0 +1,22 @@
+@startuml m3-grace-convergence-controller-sequence
+skinparam dpi 300
+title M3 — Feedback Controller: Grace <-> Convergence <-> Probe
+
+participant "Deployment\ncontroller" as DC
+participant "Coordination\ncontroller" as CC
+participant "libcluster" as LC
+participant "Horde" as H
+participant "pod / kubelet" as P
+
+DC -> CC: rolling update starting
+CC -> LC: current convergence time?
+LC --> CC: ~X s
+CC -> H: pending handoff backlog / throughput?
+H --> CC: N processes, R/s
+CC -> CC: grace = f(backlog, convergence)
+CC -> DC: set terminationGracePeriodSeconds\n+ pace maxUnavailable
+DC -> P: SIGTERM (adequate grace)
+P -> H: drain + hand off
+H --> P: handoff complete (within grace)
+note over P #ccffcc: no SIGKILL mid-handoff\n=> no state loss
+@enduml

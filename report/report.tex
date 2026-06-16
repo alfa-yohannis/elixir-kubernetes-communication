@@ -1,0 +1,206 @@
+% report.tex — Laporan: koordinasi fault tolerance lintas-lapis BEAM/OTP <-> Kubernetes
+% Kompilasi (XeLaTeX, karena memakai fontspec):
+%   xelatex report  &&  bibtex report  &&  xelatex report  &&  xelatex report
+
+\documentclass[11pt,a4paper]{report}
+
+% --- Font: Noto Serif untuk teks utama, JetBrains Mono untuk kode/lstlisting ---
+\usepackage{fontspec}
+\setmainfont{Noto Serif}
+\newfontfamily\notosans{Noto Sans}
+\setmonofont{JetBrains Mono}[Scale=0.92]
+
+\usepackage[bahasa]{babel}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{caption}
+\captionsetup{labelfont=bf}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\floatname{algorithm}{Algoritma}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor={blue!55!black},
+  citecolor={green!45!black},
+  urlcolor={magenta!70!black},
+}
+
+\graphicspath{{assets/}{../diagrams/problems/}{../diagrams/mechanisms/}{../diagrams/}}
+
+% --- Gaya listing (memakai JetBrains Mono via \ttfamily) ---
+\definecolor{codebg}{HTML}{F6F8FA}
+\definecolor{codekw}{HTML}{0B5FA5}
+\definecolor{codecm}{HTML}{6A737D}
+\definecolor{codestr}{HTML}{1A7F37}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekw}\bfseries,
+  commentstyle=\color{codecm}\itshape,
+  stringstyle=\color{codestr},
+  frame=single, framesep=5pt, rulecolor=\color{gray!35},
+  breaklines=true, showstringspaces=false, columns=fullflexible,
+  numbers=left, numberstyle=\ttfamily\footnotesize\color{gray!70},
+  xleftmargin=2.2em,
+  keywords={defmodule,def,defp,do,end,use,fn,case,cond,Supervisor,GenServer,start_link,init,children,strategy}
+}
+
+\newcommand{\todo}[1]{\textcolor{red}{[CATATAN: #1]}}
+% kotak centang untuk checklist (selesai / belum)
+\newcommand{\cbtodo}{\ensuremath{\square}}
+\newcommand{\cbdone}{\rlap{\hspace{0.12em}\raisebox{0.25ex}{\scriptsize\ensuremath{\checkmark}}}\ensuremath{\square}}
+
+\title{\textbf{Mengoordinasikan Dua Lapis Self-Healing:}\\[4pt]
+Toleransi Kesalahan Lintas-Lapis antara Runtime BEAM dan Kubernetes}
+\author{Alfa Yohannis\\ Universitas Pradita \\ \texttt{alfa.ryano@pradita.ac.id}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent Sistem Elixir berbasis cloud memuat dua mekanisme toleransi kesalahan yang
+saling tumpang tindih namun bekerja independen: supervisi OTP pada lapis \emph{runtime}
+bahasa dan \emph{self-healing} Kubernetes pada lapis orkestrasi. Masing-masing
+efektif jika berdiri sendiri, tetapi karena tidak berkoordinasi, keduanya memunculkan
+ragam kegagalan di perbatasannya---\emph{probe} yang salah melaporkan VM yang macet,
+pemulihan ganda yang mubazir, lalu lintas yang diarahkan ke node yang belum bergabung ke
+\emph{cluster}, kehilangan state ketika \emph{handoff} pada \emph{graceful shutdown}
+melampaui \emph{grace period}, serta \emph{split-brain} yang tak terlihat oleh
+orkestrator. Laporan ini mengarakterisasi celah koordinasi tersebut, mengusulkan sebuah
+protokol koordinasi lintas-lapis yang memberi supervisor OTP dan pengendali Kubernetes
+sebuah kontrak kepemilikan dan \emph{handoff} yang jelas, lalu mengevaluasinya melalui
+injeksi kesalahan terhadap \emph{baseline} tanpa koordinasi. \todo{1--2 kalimat hasil
+utama setelah evaluasi.} Kami juga menunjukkan bahwa celah ini berlaku lintas
+\emph{actor runtime}: tumpukan JVM/Akka sudah menyediakan sebagian \emph{plumbing}-nya,
+tumpukan BEAM belum, dan belum ada platform yang memformalkan koordinasi tersebut
+sebagai dua \emph{control loop} yang saling berinteraksi.
+\end{abstract}
+
+\tableofcontents
+
+\chapter{Pendahuluan}
+\label{ch:intro}
+Baik runtime BEAM/OTP maupun Kubernetes sama-sama memiliki mekanisme \emph{self-healing} bawaan,
+namun keduanya beroperasi pada granularitas yang berbeda: OTP memulihkan kegagalan pada
+tingkat \emph{process} di dalam satu VM, sedangkan Kubernetes memulihkan kegagalan pada
+tingkat \emph{pod}/\emph{node}. Karena keduanya tidak saling berbicara secara baku,
+interaksinya di perbatasan justru memunculkan masalah yang tidak dialami masing-masing
+lapis ketika bekerja sendiri. \todo{perkuat motivasi dengan laporan praktik dan isu
+\emph{rolling update} pada Akka.}
+
+\noindent Kontribusi laporan ini:
+\begin{itemize}[nosep]
+  \item Taksonomi komunikasi BEAM$\leftrightarrow$Kubernetes yang diperlukan, serta katalog
+        lima \emph{titik gesekan} runtime-vs-orkestrator (Bab~\ref{ch:problems}).
+  \item Sebuah protokol koordinasi lintas-lapis antara supervisor OTP dan pengendali
+        Kubernetes (Bab~\ref{ch:design}).
+  \item Evaluasi melalui injeksi kesalahan terhadap \emph{baseline} tanpa koordinasi
+        (Bab~\ref{ch:eval}).
+  \item Bukti bahwa celah ini dan solusi parsialnya bersifat umum lintas \emph{actor
+        runtime} (Bab~\ref{ch:disc}).
+\end{itemize}
+
+\chapter{Latar Belakang}
+\label{ch:background}
+\textbf{Supervisi OTP.} Pada BEAM, kegagalan ditangani dengan filosofi ``\emph{let it
+crash}'': sebuah \emph{supervisor} memantau anak-anaknya dan menyalakannya ulang menurut
+strategi tertentu bila terjadi \emph{crash}. Batas intensitas \emph{restart} diatur oleh
+\texttt{max\_restarts}/\texttt{max\_seconds}.
+
+\begin{lstlisting}[caption={Contoh \emph{supervision tree} OTP sederhana.}, label={lst:sup}]
+defmodule MyApp.Supervisor do
+  use Supervisor
+
+  def start_link(arg) do
+    Supervisor.start_link(__MODULE__, arg, name: __MODULE__)
+  end
+
+  def init(_arg) do
+    children = [
+      {MyApp.Worker, []},
+      {MyApp.Cache, []}
+    ]
+    Supervisor.init(children, strategy: :one_for_one, max_restarts: 3, max_seconds: 5)
+  end
+end
+\end{lstlisting}
+
+Listing~\ref{lst:sup} memperlihatkan sebuah \emph{supervisor} berstrategi
+\texttt{:one\_for\_one} yang mengawasi dua anak (\texttt{Worker} dan \texttt{Cache}):
+bila salah satu anak \emph{crash}, hanya anak itu yang disalakan ulang; bila intensitas
+\emph{restart} melampaui \texttt{max\_restarts} dalam rentang \texttt{max\_seconds},
+supervisor menghentikan dirinya sehingga kegagalan tereskalasi ke induknya. Perilaku
+eskalasi inilah yang kelak berbenturan dengan \emph{restart} pada tingkat \emph{pod}
+(Bab~\ref{ch:problems}).
+
+\noindent\textbf{Kubernetes.} Kubernetes mengelola siklus hidup \emph{pod} melalui
+\emph{liveness}/\emph{readiness probe}, pengendali (\emph{controller}),
+\emph{PodDisruptionBudget} (PDB)~\cite{k8sPDB}, dan \emph{graceful shutdown}
+(\texttt{SIGTERM} + \texttt{terminationGracePeriodSeconds}). Penskalaan berbasis metrik
+aplikasi dapat dilakukan dengan KEDA~\cite{keda}.
+
+\noindent\textbf{Klastering BEAM.} Di atas Kubernetes, pembentukan \emph{cluster} BEAM
+lazim memakai libcluster~\cite{libcluster}, sementara Horde~\cite{horde} menyediakan
+\emph{supervisor}/\emph{registry} terdistribusi dengan \emph{handoff} proses. Untuk
+menulis \emph{operator} Kubernetes dalam Elixir tersedia Bonny~\cite{bonny}.
+
+\input{readme}
+
+% ---- Bab-bab terpisah ----
+\input{problems}
+\input{literature-review}
+\input{mechanisms}
+
+\chapter{Rancangan: Protokol Koordinasi Lintas-Lapis}
+\label{ch:design}
+Kontribusi inti memaketkan M3, M7, dan M8---ditambah bagian M4 yang baru bagi BEAM
+(\emph{handoff-blocking termination} dan \emph{readiness} berbasis \emph{supervision
+tree})---menjadi satu protokol koordinasi dengan kontrak kepemilikan/\emph{handoff} yang
+jelas antara supervisor OTP dan pengendali Kubernetes.
+\todo{mesin keadaan (\emph{state machine}); antarmuka OTP$\leftrightarrow$K8s; hukum
+kendali (hukum \emph{grace} M3, pemetaan kuorum$\rightarrow$PDB M7, fungsi eskalasi
+\emph{restart-budget}$\leftrightarrow$\emph{backoff} M8); invarian keselamatan: tanpa
+pemulihan ganda, tanpa pelanggaran kuorum, tanpa \texttt{SIGKILL} di tengah \emph{handoff}.}
+
+\chapter{Metodologi Evaluasi}
+\label{ch:eval}
+\textbf{Testbed.} Aplikasi Phoenix/Elixir dengan libcluster + Horde di atas \emph{cluster}
+\texttt{kind}, dalam dua \emph{build}: terkoordinasi dan \emph{baseline} tanpa koordinasi.
+\textbf{Kesalahan} (dipetakan ke Bab~\ref{ch:problems}): \emph{rolling deploy},
+\emph{node drain}, partisi jaringan, OOM, subsistem macet, dan \emph{crash-loop}---disuntik
+dengan Chaos Mesh / LitmusChaos. \textbf{Metrik:} MTTR, kehilangan permintaan/koneksi,
+laju kehilangan state, jumlah \emph{restart} mubazir, dan \emph{overhead} koordinasi.
+\todo{matriks eksperimen; jumlah ulangan $N$; uji statistik; hasil.}
+
+\chapter{Diskusi}
+\label{ch:disc}
+\section{Generalisasi}
+\todo{posisikan terhadap Akka~\cite{akkaHealth,akkaLease} dan Orleans~\cite{orleans};
+asimetri lintas-platform; replikasi kecil di Akka untuk validitas eksternal.}
+\section{Ancaman terhadap Validitas}
+\todo{validitas konstruk/internal/eksternal/kesimpulan; bias satu ekosistem; realisme
+injeksi kesalahan; keyakinan kebaruan masih sedang sebelum verifikasi ulang.}
+
+\chapter{Kesimpulan}
+\label{ch:conclusion}
+\todo{nyatakan ulang celah koordinasi, protokol yang diusulkan, hasil utama, dan
+generalisasinya.}
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\appendix
+\input{glossary}
+\input{project-status}
+\input{roadmap}
+
+\end{document}

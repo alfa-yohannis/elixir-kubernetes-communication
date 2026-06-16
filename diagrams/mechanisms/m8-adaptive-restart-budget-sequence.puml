@@ -1,0 +1,22 @@
+@startuml m8-adaptive-restart-budget-sequence
+skinparam dpi 300
+title M8 — Adaptive Restart-Budget Escalation
+
+participant "BEAM metrics" as M
+participant "Restart-budget\ncontroller" as C
+participant "OTP supervisor" as O
+participant "K8s\n(restart + backoff)" as K
+
+M -> C: observed restart rate / fault class
+C -> O: tune max_restarts / max_seconds\n(adaptive)
+O -> O: child crashes
+alt within adaptive budget
+  O -> O: restart locally
+  note over O #ccffcc: OTP owns transient faults
+else budget exhausted
+  O -> O: terminate supervision tree
+  O -> K: exit non-zero
+  K -> K: restart pod (CrashLoopBackOff)
+  note over K #ccffcc: principled, load-adaptive\nescalation boundary
+end
+@enduml

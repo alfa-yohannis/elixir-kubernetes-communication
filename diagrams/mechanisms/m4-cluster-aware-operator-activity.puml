@@ -1,0 +1,26 @@
+@startuml m4-cluster-aware-operator-activity
+skinparam dpi 300
+title M4 — Bidirectional Membership <-> Readiness Bridge
+
+start
+fork
+  :watch Horde / distribution membership;
+  #ccffcc:reflect into pod readiness gate;
+fork again
+  :pod termination requested;
+  :hold via finalizer / preStop;
+  :trigger Horde handoff;
+  if (handoff complete?) then (yes)
+    #ccffcc:release finalizer -> allow termination;
+  else (timeout)
+    #ffcccc:escalate / alert (handoff stuck);
+  endif
+end fork
+stop
+legend right
+  Membership->readiness exists on Akka
+  (ClusterMembershipCheck); BEAM-novel parts
+  are supervision-awareness + handoff-blocking
+  termination.
+endlegend
+@enduml

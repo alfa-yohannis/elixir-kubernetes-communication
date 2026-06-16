@@ -1,0 +1,21 @@
+@startuml m9-composite-liveness-signal-sequence
+skinparam dpi 300
+title M9 — Composite BEAM Liveness Signal
+
+participant "kubelet" as K
+participant "/alive\n(composite)" as P
+participant "Signal aggregator" as A
+participant "BEAM runtime" as B
+
+K -> P: liveness probe
+P -> A: composite health?
+A -> B: scheduler util, run-queue length,\nmailbox backpressure, restart intensity
+B --> A: metrics
+A -> A: progress score vs thresholds
+alt wedged (queues growing, no throughput)
+  A --> K: UNHEALTHY
+  note over K #ccffcc: catches "VM alive but wedged"\n=> K8s restarts (a TCP probe would pass)
+else making progress
+  A --> K: healthy
+end
+@enduml

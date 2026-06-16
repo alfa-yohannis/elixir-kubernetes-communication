@@ -1,0 +1,81 @@
+% roadmap.tex — \input dari report.tex (lampiran)
+\chapter{Peta Jalan}
+\label{ch:roadmap}
+
+\section{Tujuan dan Kontribusi yang Disasar}
+Tujuan: laporan yang menegakkan sekaligus menyelesaikan \emph{celah koordinasi} antara
+toleransi kesalahan lapis-runtime (OTP/BEAM) dan lapis-orkestrator (Kubernetes).
+Kontribusi yang disasar adalah sebuah \emph{protokol koordinasi lintas-lapis} dengan
+kontrak kepemilikan/\emph{handoff} antara supervisor OTP dan pengendali Kubernetes.
+Cakupan yang disarankan: inti M3 + M7 + M8 ditambah bagian M4 yang khas BEAM; M5
+diturunkan ke pembahasan generalisasi; M1/M9 mengutip dan membedakan diri
+dari~\cite{roberts2025}.
+
+\section{Progres dan Keputusan}
+Pada daftar ini, \cbdone\ berarti selesai dan \cbtodo\ berarti belum.
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbdone] Taksonomi komunikasi A--E (Bab~\ref{ch:background}).
+  \item[\cbdone] Lima titik gesekan + skenario + diagram (Bab~\ref{ch:problems}).
+  \item[\cbdone] Pertanyaan penelitian RQ1--RQ5 dan mekanisme M1--M9.
+  \item[\cbdone] Uji-tekan kebaruan (24 sumber, 15 klaim terkonfirmasi).
+  \item[\cbtodo] Keputusan: ambisi cakupan---bundel M3+M7+M8(+M4) vs.\ satu mekanisme tajam.
+  \item[\cbtodo] Keputusan: sasaran venue (menentukan format dan ambang rigor).
+  \item[\cbtodo] Keputusan: evaluasi \emph{testbed} nyata vs.\ simulasi/model.
+\end{itemize}
+
+\section{Fase}
+
+\subsection*{Fase 0 --- \emph{Due diligence} kebaruan (kecil, lebih dulu)}
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbdone] Verifikasi ulang tiga petunjuk yang \emph{abstain} \textbf{(selesai)}:
+        \texttt{akkadotnet-healthcheck} \emph{terkonfirmasi} (jembatan keanggotaan$\rightarrow$\emph{probe}
+        ada juga di .NET); Beamlens \emph{tanpa} integrasi Kubernetes (alat diagnostik LLM di
+        \emph{supervision tree}); Akka Coordination-Lease \emph{terkonfirmasi} memakai CRD
+        \texttt{akka.io/v1 Lease} di etcd.
+  \item[\cbdone] Telusuri Scholar/DBLP/IEEE~Xplore \textbf{(selesai)}: tidak ditemukan protokol
+        koordinasi OTP$\leftrightarrow$K8s yang terbit; karya terbagi dua (FT BEAM internal
+        vs.\ FT Kubernetes).
+  \item[\cbdone] Pastikan belum ada protokol koordinasi OTP$\leftrightarrow$K8s yang terbit:
+        \emph{celah terkonfirmasi}; keyakinan kebaruan naik sedang $\rightarrow$ tinggi untuk
+        celah inti (M3/M7/M8).
+\end{itemize}
+
+\subsection*{Fase 1 --- Perancangan mekanisme (RQ4)}
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbtodo] Formalkan protokol: mesin keadaan kepemilikan/\emph{handoff}.
+  \item[\cbtodo] Definisikan antarmuka OTP$\leftrightarrow$K8s.
+  \item[\cbtodo] Tetapkan hukum kendali M3/M7/M8.
+  \item[\cbtodo] (opsional) model formal ringan + invarian keselamatan.
+\end{itemize}
+
+\subsection*{Fase 2 --- Implementasi acuan + \emph{testbed}}
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbtodo] Aplikasi Phoenix + libcluster + Horde.
+  \item[\cbtodo] Komponen koordinasi: operator Bonny + agen sisi BEAM.
+  \item[\cbtodo] \emph{Testbed} \texttt{kind}; \emph{build} terkoordinasi dan \emph{baseline}.
+\end{itemize}
+
+\subsection*{Fase 3 --- Evaluasi injeksi kesalahan (RQ2/RQ3)}
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbtodo] Matriks kesalahan $\times$ alat $\times$ metrik (Chaos Mesh/LitmusChaos).
+  \item[\cbtodo] Metrik: MTTR, kehilangan permintaan, laju kehilangan state, \emph{restart} mubazir.
+  \item[\cbtodo] $N$ ulangan + analisis statistik; \emph{baseline} vs.\ terkoordinasi.
+\end{itemize}
+
+\subsection*{Fase 4 --- Generalisasi (RQ5)}
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbtodo] Posisikan terhadap Akka~\cite{akkaHealth,akkaLease} dan Orleans~\cite{orleans}.
+  \item[\cbtodo] Argumentasikan asimetri lintas-platform.
+\end{itemize}
+
+\subsection*{Fase 5 --- Penulisan \& pengiriman}
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbtodo] Kerangka makalah; pustaka; ancaman validitas; paket reproduksibilitas.
+\end{itemize}
+
+\section{Sasaran Venue dan Risiko}
+Venue Q1 (Scopus) yang sesuai: JSS, EMSE, FGCS, \emph{Software: Practice \& Experience};
+atau IEEE TPDS/TCC/TDSC bila mekanismenya cukup teoretis. Risiko utama: keyakinan
+kebaruan masih sedang (ditutup Fase~0); beban rekayasa \emph{testbed} (dapat dipersempit
+ke satu mekanisme); kerasnya tuntutan rigor evaluasi; serta persepsi ``\emph{niche}'',
+yang dijawab oleh bingkai asimetri lintas-platform pada RQ5.

@@ -1,0 +1,20 @@
+@startuml m9-composite-liveness-signal-activity
+skinparam dpi 300
+title M9 — Composite Liveness vs TCP/HTTP Probe
+
+start
+:liveness probe fires;
+:sample BEAM signals\n(scheduler util, run-queue,\nmailbox backpressure, restart intensity);
+:compute composite progress score;
+if (making real progress?) then (yes)
+  #ccffcc:healthy;
+  stop
+else (no - wedged)
+  #ccffcc:UNHEALTHY -> K8s restarts;
+  stop
+endif
+legend right
+  A naive TCP "port open" probe would
+  falsely pass on a wedged VM (friction #1).
+endlegend
+@enduml

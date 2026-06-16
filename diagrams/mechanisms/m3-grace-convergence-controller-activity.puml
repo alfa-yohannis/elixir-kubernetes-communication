@@ -1,0 +1,21 @@
+@startuml m3-grace-convergence-controller-activity
+skinparam dpi 300
+title M3 — Dynamic Grace-Period Control Loop
+
+start
+:rolling deploy triggered;
+:measure handoff backlog + throughput\n+ libcluster convergence + in-flight work;
+:compute required grace + rollout pace;
+:set terminationGracePeriodSeconds\nand maxUnavailable;
+:SIGTERM pod; begin drain;
+repeat
+  :hand off processes; monitor backlog;
+repeat while (handoff still in progress?) is (yes)
+->done;
+#ccffcc:clean shutdown, no state loss;
+stop
+legend right
+  Feedback: if handoff lags, extend grace /
+  slow the rollout before SIGKILL.
+endlegend
+@enduml

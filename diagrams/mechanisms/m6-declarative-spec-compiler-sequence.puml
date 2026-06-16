@@ -1,0 +1,16 @@
+@startuml m6-declarative-spec-compiler-sequence
+skinparam dpi 300
+title M6 — One Declarative FT Spec -> OTP + K8s
+
+participant "Developer" as DEV
+participant "FT spec (DSL)" as SPEC
+participant "Compiler" as C
+participant "OTP supervision\n(generated)" as OTP
+participant "K8s manifests\n(generated)" as K8S
+
+DEV -> SPEC: declare intent\n(statefulness, recovery, quorum, timing)
+SPEC -> C: compile
+C -> OTP: supervisor tree + strategy\n+ max_restarts + shutdown
+C -> K8S: probes + PDB + grace\n+ anti-affinity
+note over OTP,K8S #ccffcc: both layers consistent\nby construction (no config drift)
+@enduml

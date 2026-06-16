@@ -1,0 +1,301 @@
+% mechanisms.tex — \input dari report.tex
+\chapter{Mekanisme Kandidat}
+\label{ch:mechanisms}
+
+Kami mempertimbangkan sembilan mekanisme koordinasi kandidat (M1--M9), masing-masing
+menyasar sebuah titik gesekan pada Bab~\ref{ch:problems}; vonis kebaruannya terangkum pada
+Tabel~\ref{tab:verdicts}. Tiap mekanisme disajikan dengan diagram sekuens, diagram
+aktivitas, dan pseudokode (hijau menandai hasil terkoordinasi yang diinginkan), lalu
+pembahasan yang menelusuri ketiganya.
+
+\section{M1 --- Semantik \emph{Probe} dari \emph{Supervision Tree}}
+\label{sec:m1}
+Alih-alih \texttt{/healthz} yang ditulis tangan, sebuah \emph{health deriver} menurunkan
+keadaan \emph{probe} dari intensitas \emph{restart} dan deteksi subpohon yang macet pada
+\emph{supervision tree}, sehingga Kubernetes bertindak atas kesehatan supervisi yang
+sebenarnya.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m1-supervision-derived-probes-sequence}
+  \caption{M1 (sekuens): kubelet memanggil \texttt{/healthz}; \emph{health deriver} membaca
+  keadaan \emph{supervision tree} dan membalas sehat/tidak berdasarkan intensitas
+  \emph{restart} serta deteksi macet, bukan sekadar penerimaan \emph{socket}.}\label{fig:m1-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m1-supervision-derived-probes-activity}
+  \caption{M1 (aktivitas): keputusan bercabang pada ``subpohon kritis macet atau
+  over-\emph{restart}?''; bila ya, \emph{pod} dinyatakan tidak sehat sehingga Kubernetes
+  men-\emph{deroute}/me-\emph{restart}.}\label{fig:m1-act}\end{figure}
+\begin{algorithm}[H]\caption{M1 --- penurunan keadaan \emph{probe} dari \emph{supervision tree}.}\label{alg:m1}
+\begin{algorithmic}[1]
+\Function{ProbeHandler}{} \Comment{dipanggil saat /healthz}
+  \State $S \gets$ \Call{InspectSupervisionTree}{} \Comment{intensitas restart, deteksi macet}
+  \If{$\exists\, t \in S : t.\textit{restartRate} > \tau$ \textbf{ or } $t.\textit{wedged}$}
+    \State \Return $503$ \Comment{tidak sehat}
+  \Else
+    \State \Return $200$
+  \EndIf
+\EndFunction
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m1-seq}) menelusuri jalur
+\emph{probe}: kubelet~$\rightarrow$~\texttt{/healthz}~$\rightarrow$~\emph{health
+deriver}~$\rightarrow$~\emph{supervision tree}, lalu vonis dikembalikan ke kubelet---berbeda
+dari jalur naif Masalah~1 yang berhenti di \emph{listener}. Diagram aktivitas
+(Gambar~\ref{fig:m1-act}) menempatkan satu percabangan inti: bila ada subpohon kritis yang
+macet atau melampaui ambang \emph{restart}, alur menuju ``tidak sehat'' (jalur hijau yang
+membuat Kubernetes bertindak). Algoritma~\ref{alg:m1} memerincinya: baris~2 mengambil
+keadaan \emph{supervision tree}; baris~3 mengevaluasi tiap subpohon $t$ terhadap ambang
+$\tau$ dan bendera \textit{wedged}; bila terpenuhi, baris~4 mengembalikan \texttt{503},
+selainnya baris~6 mengembalikan \texttt{200}---memetakan kesehatan supervisi langsung ke
+semantik \emph{probe}.
+
+\section{M2 --- Delegasi Kepemilikan Kegagalan}
+\label{sec:m2}
+Sebuah pengklasifikasi memutuskan lapis mana (supervisor OTP atau pengendali Kubernetes)
+yang memulihkan suatu kelas kegagalan, sehingga menghindari pemulihan ganda.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m2-failure-ownership-delegation-sequence}
+  \caption{M2 (sekuens): \emph{fault event} masuk ke pengklasifikasi; berdasarkan kelasnya,
+  hanya \emph{satu} otoritas (OTP \emph{atau} Kubernetes) yang dipicu.}\label{fig:m2-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m2-failure-ownership-delegation-activity}
+  \caption{M2 (aktivitas): keputusan kepemilikan menurut kelas kegagalan
+  (proses/sumber daya/node), memetakan tiap kelas ke tepat satu lapis pemulihan.}\label{fig:m2-act}\end{figure}
+\begin{algorithm}[H]\caption{M2 --- delegasi kepemilikan kegagalan.}\label{alg:m2}
+\begin{algorithmic}[1]
+\Procedure{OnFault}{$f$}
+  \State $c \gets$ \Call{Classify}{$f$} \Comment{transient $\mid$ resource $\mid$ node}
+  \If{$c = \textit{process}$}
+    \State \Call{OTP.Restart}{$f.\textit{child}$} \Comment{K8s tidak diberi tahu}
+  \Else
+    \State \Call{OTP.StandDown}{$f$}; \Call{K8s.RestartPod}{}
+  \EndIf
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m2-seq}) menunjukkan
+\emph{fault event}~$\rightarrow$~\emph{failure classifier} yang lalu mengarahkan pesan
+\emph{hanya} ke satu otoritas, kebalikan dari Masalah~2 yang kedua lapisnya bereaksi.
+Diagram aktivitas (Gambar~\ref{fig:m2-act}) adalah pohon keputusan berlabel kelas
+kegagalan. Algoritma~\ref{alg:m2} memformalkannya: baris~2 mengklasifikasi $f$; bila
+kelasnya \textit{process} (baris~3), baris~4 me-\emph{restart} via OTP \emph{tanpa}
+memberi tahu Kubernetes; selainnya baris~6 membuat OTP mundur dan menyerahkan pemulihan
+ke Kubernetes---kontrak ``satu kegagalan, satu otoritas''.
+
+\section{M3 --- Pengendali Umpan-Balik: \emph{Grace} $\leftrightarrow$ Konvergensi $\leftrightarrow$ \emph{Probe}}
+\label{sec:m3}
+Sebuah pengendali menghitung \texttt{terminationGracePeriodSeconds} secara dinamis dari
+\emph{backlog} \emph{handoff} Horde dan waktu konvergensi libcluster, sehingga \emph{drain}
+dan \emph{handoff} selesai sebelum \texttt{SIGKILL}.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m3-grace-convergence-controller-sequence}
+  \caption{M3 (sekuens): pengendali koordinasi mengukur \emph{backlog}/laju \emph{handoff}
+  dan waktu konvergensi, lalu menetapkan \emph{grace period} yang memadai sebelum
+  \texttt{SIGTERM} dikirim.}\label{fig:m3-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m3-grace-convergence-controller-activity}
+  \caption{M3 (aktivitas): \emph{loop} kendali yang memperpanjang \emph{grace}/memperlambat
+  \emph{rollout} bila \emph{handoff} melambat, hingga \emph{handoff} tuntas.}\label{fig:m3-act}\end{figure}
+\begin{algorithm}[H]\caption{M3 --- kendali \emph{grace period} dinamis.}\label{alg:m3}
+\begin{algorithmic}[1]
+\Procedure{OnRollingUpdate}{}
+  \State $g \gets \max(\textsc{HandoffBacklog}()/\rho,\ \textsc{ConvergenceTime}(),\ g_{\min})$
+  \State \Call{SetGracePeriod}{$g$}; \Call{Pace}{\textit{maxUnavailable}}
+  \State \textbf{on} \texttt{SIGTERM}: \Call{Drain}{}
+  \While{\Call{HandoffPending}{}}
+    \State \Call{Handoff}{} \Comment{perpanjang $g$ bila melambat}
+  \EndWhile
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m3-seq}) menelusuri
+pertanyaan pengendali ke libcluster (waktu konvergensi) dan Horde (\emph{backlog}/laju),
+lalu penetapan \emph{grace} ke \emph{Deployment} sebelum \texttt{SIGTERM}---menutup celah
+waktu Masalah~4. Diagram aktivitas (Gambar~\ref{fig:m3-act}) memodelkan \emph{loop} dengan
+umpan balik: selama \emph{handoff} berjalan, \emph{grace} diperpanjang/rollout diperlambat.
+Algoritma~\ref{alg:m3} memerincinya: baris~2 menghitung \emph{grace} $g$ sebagai
+\emph{maksimum} dari (waktu menghabiskan \emph{backlog} pada laju $\rho$, waktu
+konvergensi, dan batas bawah $g_{\min}$); baris~3 menetapkan \emph{grace} dan men-\emph{pace}
+\texttt{maxUnavailable}; baris~4 men-\emph{drain} saat \texttt{SIGTERM}; perulangan
+baris~5--7 melanjutkan \emph{handoff} hingga tuntas.
+
+\section{M4 --- \emph{Operator} Sadar-\emph{Cluster} BEAM + Jembatan Kesehatan}
+\label{sec:m4}
+Sebuah \emph{operator} (pengendali kustom Kubernetes, di sini ditulis dalam Elixir dengan
+Bonny) memantulkan keanggotaan Horde/distribusi Erlang ke \emph{readiness} \emph{pod} dan
+menahan terminasi hingga \emph{handoff} selesai. Jembatan
+keanggotaan$\rightarrow$\emph{readiness} sudah ada di Akka; yang baru bagi BEAM adalah
+penahanan terminasi dan kesadaran \emph{supervision tree}.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m4-cluster-aware-operator-sequence}
+  \caption{M4 (sekuens): operator mengawasi keanggotaan dan menyetel \emph{readiness gate};
+  saat terminasi, ia menahan via \emph{finalizer} sampai \emph{handoff} selesai sebelum
+  melepas \emph{pod}.}\label{fig:m4-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m4-cluster-aware-operator-activity}
+  \caption{M4 (aktivitas): dua jalur paralel---\emph{loop} rekonsiliasi keanggotaan$\rightarrow$\emph{readiness},
+  dan penanganan terminasi yang memblokir hingga \emph{handoff} tuntas.}\label{fig:m4-act}\end{figure}
+\begin{algorithm}[H]\caption{M4 --- operator + jembatan kesehatan dua arah.}\label{alg:m4}
+\begin{algorithmic}[1]
+\Loop\ \textsc{Reconcile}
+  \State $m \gets$ \Call{WatchMembership}{}; \Call{SetReadinessGate}{$\textit{pod}, m.\textit{up}$}
+\EndLoop
+\Procedure{OnTerminate}{$\textit{pod}$}
+  \State \Call{HoldViaFinalizer}{$\textit{pod}$}; \Call{TriggerHandoff}{}
+  \State \textbf{wait until} \Call{HandoffDone}{} \textbf{or} \textit{timeout}
+  \State \Call{ReleaseFinalizer}{$\textit{pod}$}
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m4-seq}) menelusuri dua
+interaksi: operator membaca keanggotaan Horde lalu menulis \emph{readiness gate} (menutup
+Masalah~3), dan saat penghapusan \emph{pod} diminta, ia menahan via \emph{finalizer} sampai
+\emph{handoff} selesai (menutup Masalah~4). Diagram aktivitas (Gambar~\ref{fig:m4-act})
+memperlihatkan dua jalur paralel tersebut sebagai \emph{fork}. Algoritma~\ref{alg:m4}
+memformalkannya: \emph{loop} \textsc{Reconcile} (baris~1--3) terus memantulkan status
+\textit{up} ke \emph{readiness gate}; \textsc{OnTerminate} (baris~4--8) menahan via
+\emph{finalizer}, memicu \emph{handoff}, menunggu hingga selesai \emph{atau} \emph{timeout},
+baru melepas \emph{finalizer}.
+
+\section{M5 --- Arbiter \emph{Split-Brain} via \emph{Lease}/etcd}
+\label{sec:m5}
+Saat partisi, tiap sisi mencoba mengambil \emph{Kubernetes Lease} (didukung etcd); hanya
+pemegang \emph{lease} yang tetap otoritatif, menggantikan \emph{last-writer-wins}
+\texttt{:global}. Pola ini sudah ada di Akka sehingga M5 hanya baru sebagai penerapan
+khas BEAM.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m5-lease-fencing-arbiter-sequence}
+  \caption{M5 (sekuens): kedua sisi partisi memperebutkan \emph{Lease} via etcd CAS; hanya
+  pemenang yang \emph{keeps singletons}, sisi minoritas \emph{fences itself}.}\label{fig:m5-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m5-lease-fencing-arbiter-activity}
+  \caption{M5 (aktivitas): keputusan tunggal ``berhasil ambil \emph{lease}?''---ya: tetap
+  otoritatif; tidak: \emph{fence}/hentikan \emph{singleton}.}\label{fig:m5-act}\end{figure}
+\begin{algorithm}[H]\caption{M5 --- \emph{fencing} \emph{split-brain} via \emph{Lease}.}\label{alg:m5}
+\begin{algorithmic}[1]
+\Procedure{OnPartition}{}
+  \If{\Call{AcquireLease}{\textit{k8sLease}}}
+    \State \Call{RemainAuthoritative}{}
+  \Else
+    \State \Call{StopSingletons}{} \Comment{fence: minoritas mundur}
+  \EndIf
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m5-seq}) menggantikan
+``kedua sisi mendaftar'' dari Masalah~5 dengan perebutan \emph{Lease}: tiap sisi memanggil
+etcd \emph{CAS}, hanya satu yang \texttt{GRANTED} dan menjaga \emph{singleton}-nya,
+sementara yang \texttt{DENIED} mem-\emph{fence} diri. Diagram aktivitas
+(Gambar~\ref{fig:m5-act}) menyederhanakannya menjadi satu percabangan biner. Algoritma~\ref{alg:m5}
+memerincinya: baris~2 mencoba \textsc{AcquireLease}; bila berhasil, baris~3 tetap
+otoritatif; selainnya baris~5 menghentikan \emph{singleton} (mundur sebagai minoritas)---
+mengganti \emph{last-writer-wins} yang merusak dengan \emph{fencing} terprinsip.
+
+\section{M6 --- Satu Spesifikasi Deklaratif $\rightarrow$ OTP + Manifes K8s}
+\label{sec:m6}
+Satu spesifikasi toleransi kesalahan dikompilasi menjadi spesifikasi supervisi OTP
+\emph{dan} manifes Kubernetes, sebagai sumber kebenaran tunggal yang menghapus \emph{drift}
+konfigurasi.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m6-declarative-spec-compiler-sequence}
+  \caption{M6 (sekuens): pengembang menulis satu \emph{FT spec}; \emph{compiler}
+  memancarkan spesifikasi supervisi OTP dan manifes Kubernetes yang konsisten.}\label{fig:m6-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m6-declarative-spec-compiler-activity}
+  \caption{M6 (aktivitas): satu sumber bercabang (\emph{fork}) menjadi dua keluaran lapis,
+  sehingga ``ubah spesifikasi sekali'' meregenerasi keduanya.}\label{fig:m6-act}\end{figure}
+\begin{algorithm}[H]\caption{M6 --- kompilasi spesifikasi lintas-lapis.}\label{alg:m6}
+\begin{algorithmic}[1]
+\Function{Compile}{\textit{spec}}
+  \State $\textit{otp} \gets$ \Call{GenSupervision}{\textit{spec}} \Comment{strategy, max\_restarts, shutdown}
+  \State $\textit{k8s} \gets$ \Call{GenManifests}{\textit{spec}} \Comment{probe, PDB, grace, anti-affinity}
+  \State \Return $(\textit{otp}, \textit{k8s})$
+\EndFunction
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m6-seq}) menelusuri alur
+penulisan~$\rightarrow$~kompilasi~$\rightarrow$~dua keluaran (OTP dan K8s) dari satu
+\emph{spec}. Diagram aktivitas (Gambar~\ref{fig:m6-act}) menampilkannya sebagai
+\emph{fork} satu-ke-dua, menegaskan prinsip ``ubah spesifikasi sekali''.
+Algoritma~\ref{alg:m6} ringkas namun menyeluruh: baris~2 membangkitkan spesifikasi
+supervisi OTP (strategi, \texttt{max\_restarts}, \emph{shutdown}); baris~3 membangkitkan
+manifes Kubernetes (\emph{probe}, PDB, \emph{grace}, \emph{anti-affinity}); baris~4
+mengembalikan pasangan yang konsisten \emph{by construction}, sehingga \emph{drift}
+mustahil terbentuk.
+
+\section{M7 --- PDB/maxUnavailable $\leftrightarrow$ Kuorum BEAM}
+\label{sec:m7}
+Sebuah pengendali menurunkan \emph{PodDisruptionBudget} (PDB---batas \emph{pod} yang boleh
+tak tersedia saat gangguan sukarela)/\texttt{maxUnavailable} dari syarat kuorum dan
+kapasitas \emph{handoff} BEAM, sehingga gangguan sukarela tak pernah memutus kuorum.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m7-pdb-quorum-coupling-sequence}
+  \caption{M7 (sekuens): \emph{quorum controller} menetapkan PDB dari kuorum/kapasitas
+  \emph{handoff}; saat \emph{eviction}, API menolak bila kuorum akan pecah.}\label{fig:m7-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m7-pdb-quorum-coupling-activity}
+  \caption{M7 (aktivitas): gangguan sukarela diizinkan hanya bila tetap menghormati kuorum;
+  selainnya \emph{eviction} diblokir.}\label{fig:m7-act}\end{figure}
+\begin{algorithm}[H]\caption{M7 --- kopling PDB ke kuorum BEAM.}\label{alg:m7}
+\begin{algorithmic}[1]
+\Procedure{OnClusterChange}{}
+  \State \Call{SetPDB}{\textit{minAvailable}{=}\textsc{Quorum}(),\ \textit{maxUnavailable}{=}\textsc{HandoffCap}()}
+\EndProcedure
+\Procedure{OnEviction}{\textit{pod}}
+  \If{\Call{ViolatesQuorum}{\textit{pod}}} \State \Call{Deny}{} \Else\ \State \Call{Allow}{}; \Call{Handoff}{} \EndIf
+\EndProcedure
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m7-seq}) menelusuri
+\emph{quorum controller} yang membaca ukuran \emph{cluster}, ambang kuorum, dan kapasitas
+\emph{handoff}, lalu menulis PDB; ketika \emph{eviction/drain API} meminta pengusiran,
+keputusan \emph{allow}/\emph{block} mengalir balik. Diagram aktivitas
+(Gambar~\ref{fig:m7-act}) menempatkan keputusan pada ``\emph{eviction} menghormati PDB
+(kuorum aman)?''. Algoritma~\ref{alg:m7} memformalkannya dalam dua prosedur:
+\textsc{OnClusterChange} (baris~2) menyetel \texttt{minAvailable} ke kuorum dan
+\texttt{maxUnavailable} ke kapasitas \emph{handoff}; \textsc{OnEviction} (baris~4--6)
+menolak bila melanggar kuorum, selainnya mengizinkan lalu mela\-kukan \emph{handoff}.
+
+\section{M8 --- Eskalasi \emph{Restart-Budget} Adaptif $\leftrightarrow$ \emph{Backoff} K8s}
+\label{sec:m8}
+Sebuah pengendali menyetel \texttt{max\_restarts}/\texttt{max\_seconds} OTP menurut laju
+kegagalan teramati dan memetakan batas eskalasi ke \emph{restart}/\emph{backoff} Kubernetes.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m8-adaptive-restart-budget-sequence}
+  \caption{M8 (sekuens): pengendali menyesuaikan jatah \emph{restart} dari \emph{fault rate};
+  saat jatah habis, VM keluar non-nol dan Kubernetes me-\emph{restart} dengan \emph{backoff}.}\label{fig:m8-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m8-adaptive-restart-budget-activity}
+  \caption{M8 (aktivitas): batas ``OTP menangani'' vs.\ ``K8s me-\emph{restart pod}''
+  ditetapkan secara adaptif terhadap beban, bukan konstanta statis.}\label{fig:m8-act}\end{figure}
+\begin{algorithm}[H]\caption{M8 --- eskalasi \emph{restart-budget} adaptif.}\label{alg:m8}
+\begin{algorithmic}[1]
+\Loop
+  \State $r \gets$ \Call{ObservedFaultRate}{}; $(M_r,M_s) \gets$ \Call{AdaptBudget}{$r$, \textit{hist}}
+  \State \Call{OTP.SetRestartIntensity}{$M_r, M_s$}
+\EndLoop
+\State \textbf{on} \textsc{IntensityExceeded}: \Call{OTP.TerminateTree}{}; \Call{Exit}{$\neq 0$} \Comment{K8s backoff}
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m8-seq}) menelusuri umpan
+\emph{BEAM metrics}~$\rightarrow$~pengendali~$\rightarrow$~penyetelan jatah pada supervisor;
+ketika jatah terlampaui, VM keluar dan Kubernetes me-\emph{restart} dengan \emph{backoff}.
+Diagram aktivitas (Gambar~\ref{fig:m8-act}) menggambarkan perulangan ``\emph{crash} di
+dalam jatah?''---ya: OTP menyalakan ulang; tidak: eskalasi. Algoritma~\ref{alg:m8}
+memerincinya: \emph{loop} baris~1--4 mengamati \emph{fault rate} $r$, menghitung jatah baru
+$(M_r,M_s)=f(r,\textit{hist})$, dan menyetelnya pada OTP; baris~5 menangani
+\textsc{IntensityExceeded} dengan mematikan pohon dan keluar non-nol---batas eskalasi yang
+terprinsip dan adaptif-beban.
+
+\section{M9 --- Sinyal \emph{Liveness} Komposit BEAM}
+\label{sec:m9}
+Sebuah agregator menghitung kesehatan komposit dari utilisasi \emph{scheduler}, panjang
+\emph{run-queue}, tekanan \emph{message-queue}, dan intensitas \emph{restart}---semuanya
+metrik internal VM BEAM---menggantikan \emph{probe} TCP/HTTP.
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m9-composite-liveness-signal-sequence}
+  \caption{M9 (sekuens): \emph{signal aggregator} mengumpulkan sinyal runtime BEAM dan
+  melayani \texttt{/alive} komposit; macet terdeteksi meski VM ``hidup''.}\label{fig:m9-seq}\end{figure}
+\begin{figure}[H]\centering\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{m9-composite-liveness-signal-activity}
+  \caption{M9 (aktivitas): \emph{composite progress score} dibandingkan ambang; di bawah
+  ambang berarti tidak sehat, menangkap kasus ``\emph{wedged VM}''.}\label{fig:m9-act}\end{figure}
+\begin{algorithm}[H]\caption{M9 --- sinyal \emph{liveness} komposit BEAM.}\label{alg:m9}
+\begin{algorithmic}[1]
+\Function{LivenessHandler}{}
+  \State $\sigma \gets (\textit{schedUtil}, \textit{runQueue}, \textit{mailbox}, \textit{restartRate})$
+  \State $s \gets$ \Call{ProgressScore}{$\sigma$}
+  \If{$s < \theta$} \State \Return \textit{unhealthy} \Else\ \State \Return \textit{healthy} \EndIf
+\EndFunction
+\end{algorithmic}\end{algorithm}
+
+\noindent\textbf{Pembahasan.} Diagram sekuens (Gambar~\ref{fig:m9-seq}) menelusuri
+kubelet~$\rightarrow$~\texttt{/alive}~$\rightarrow$~\emph{signal aggregator}~$\rightarrow$~runtime
+BEAM, lalu skor dikembalikan---menangkap ``\emph{wedged VM}'' yang lolos pada Masalah~1.
+Diagram aktivitas (Gambar~\ref{fig:m9-act}) menempatkan satu percabangan: ``skor kemajuan
+$< \theta$?''. Algoritma~\ref{alg:m9} memerincinya: baris~2 mengumpulkan vektor sinyal
+$\sigma$ (utilisasi \emph{scheduler}, panjang \emph{run-queue}, \emph{mailbox}, intensitas
+\emph{restart}); baris~3 menghitung \emph{composite progress score} $s$; baris~4
+mengembalikan \textit{unhealthy} bila $s<\theta$, selainnya \textit{healthy}---vonis yang
+mencerminkan kemajuan nyata, bukan sekadar \emph{port} terbuka.

@@ -1,0 +1,35 @@
+@startuml 03-readiness-cluster-sequence
+skinparam dpi 300
+title Problem 3 — Readiness vs. Cluster Formation (ArenaServer)
+
+actor Player
+participant "kubelet\n(readiness)" as Kubelet
+participant "Service /\nEndpoints" as Svc
+participant "pod-7\nCowboy :4000" as P7
+participant "pod-7\nlibcluster" as LC
+participant "pod-7\nHorde.Registry" as Horde
+participant "pod-3\n(owns match abc)" as P3
+
+== pod-7 starts (rolling deploy) ==
+P7 -> P7: bind :4000 (~1s)
+Kubelet -> P7: readiness TCP :4000
+P7 --> Kubelet: ACK
+Kubelet -> Svc: add pod-7 to endpoints
+note over LC,Horde #ffcccc: libcluster poll (5s) not fired yet\nHorde registry still empty
+
+== traffic arrives too early ==
+Player -> Svc: join match abc
+Svc -> P7: route to pod-7
+P7 -> Horde: lookup(abc)
+Horde --> P7: :not_found
+alt returns error
+  P7 --> Player: "match not found"
+else spawns duplicate (worse)
+  P7 -> Horde: register local abc
+  note over P7,P3 #ffcccc: match abc now split\nacross pod-7 and pod-3
+end
+
+== too late: cluster converges ==
+LC -> Horde: peers discovered, sync
+Horde -> Horde: registry conflict on abc
+@enduml

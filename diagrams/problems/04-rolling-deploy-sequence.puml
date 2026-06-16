@@ -1,0 +1,30 @@
+@startuml 04-rolling-deploy-sequence
+skinparam dpi 300
+title Problem 4 — Rolling-Deploy Churn / Handoff vs. Grace (CoEdit)
+
+participant "Deployment\ncontroller" as Dep
+participant "kubelet" as Kubelet
+participant "pod-2 BEAM\n(400 doc procs)" as P2
+participant "Phoenix\nEndpoint" as EP
+participant "Horde" as Horde
+participant "surviving\nnode" as Surv
+actor Client
+
+Dep -> Kubelet: rolling update -> terminate pod-2
+Kubelet -> P2: SIGTERM
+note right of Kubelet: terminationGracePeriodSeconds = 30
+P2 -> P2: trap SIGTERM
+P2 -> EP: drain (stop accepting)
+P2 -> Horde: hand off 400 doc processes
+
+loop each document (serialize + transfer CRDT)
+  Horde -> Surv: transfer doc state
+end
+note over Horde,Surv #ffcccc: handoff takes ~45s under load
+
+Kubelet -> P2: SIGKILL (at t = 30s)
+note over P2 #ffcccc: ~150 docs not yet moved\ndie with unsynced edits
+
+Client -> Surv: reconnect
+Surv --> Client: doc missing recent edits
+@enduml

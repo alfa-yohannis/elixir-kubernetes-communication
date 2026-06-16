@@ -1,0 +1,23 @@
+@startuml 03-readiness-cluster-activity
+skinparam dpi 300
+title Problem 3 — Readiness Gating Policy (ArenaServer)
+
+start
+:pod starts;
+:Cowboy binds port 4000 (~1s);
+note right: libcluster + Horde\nnot converged yet (5s+)
+if (readiness gate?) then (port open only)
+  #ffcccc:READY too early;
+  :K8s routes player traffic;
+  :Horde lookup -> empty;
+  #ffcccc:"match not found"\nor duplicate singleton (split match);
+  stop
+else (cluster joined AND Horde converged)
+  :wait for libcluster + Horde sync;
+  #ccffcc:READY after convergence;
+  :K8s routes player traffic;
+  :Horde lookup -> found on owner node;
+  #ccffcc:match served correctly;
+  stop
+endif
+@enduml

@@ -1,0 +1,20 @@
+@startuml m5-lease-fencing-arbiter-activity
+skinparam dpi 300
+title M5 — Lease-Majority Fencing on Partition
+
+start
+:network partition detected;
+:request K8s Lease (etcd consistency);
+if (lease acquired?) then (yes)
+  #ccffcc:remain authoritative;
+  stop
+else (no)
+  #ccffcc:fence: stop singletons on this side;
+  stop
+endif
+legend right
+  Replaces :global last-writer-wins.
+  NB: pattern already exists on Akka
+  (lease-majority SBR) -> reframe BEAM-specific.
+endlegend
+@enduml

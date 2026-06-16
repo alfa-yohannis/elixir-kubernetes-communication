@@ -1,0 +1,20 @@
+@startuml m2-failure-ownership-delegation-sequence
+skinparam dpi 300
+title M2 — Failure-Ownership Delegation
+
+participant "Fault event" as F
+participant "Failure classifier\n(ownership policy)" as C
+participant "OTP supervisor" as O
+participant "K8s controller" as K
+
+F -> C: process crash / fault signal
+C -> C: classify fault class\n(transient | resource | node)
+alt process-level (OTP owns)
+  C -> O: restart child
+  note over K #ccffcc: K8s NOT triggered\n=> no double recovery
+else VM / node / infra (K8s owns)
+  C -> O: stand down (yield)
+  C -> K: restart pod / reschedule
+  note over O #ccffcc: OTP yields ownership\n=> single recovery authority
+end
+@enduml

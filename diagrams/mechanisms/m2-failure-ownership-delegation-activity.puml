@@ -1,0 +1,21 @@
+@startuml m2-failure-ownership-delegation-activity
+skinparam dpi 300
+title M2 — Fault-Class Ownership Decision
+
+start
+:fault detected;
+:classify against ownership policy;
+if (fault-class owner?) then (OTP: transient/process)
+  #ccffcc:OTP supervisor restarts;
+  :suppress K8s reaction;
+  stop
+else (K8s: VM/node/resource)
+  :OTP yields;
+  #ccffcc:K8s restarts pod / reschedules;
+  stop
+endif
+legend right
+  One fault -> one recovery authority;
+  prevents OTP and K8s both reacting.
+endlegend
+@enduml

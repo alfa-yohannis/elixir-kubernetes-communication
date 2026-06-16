@@ -1,0 +1,21 @@
+@startuml m7-pdb-quorum-coupling-activity
+skinparam dpi 300
+title M7 — Quorum-Aware Voluntary Disruption
+
+start
+:cluster change / drain requested;
+:compute quorum need + handoff capacity;
+:set PDB minAvailable / maxUnavailable;
+if (eviction respects PDB? quorum safe?) then (yes)
+  #ccffcc:allow eviction -> handoff -> proceed;
+  stop
+else (no)
+  #ccffcc:block eviction (protect quorum);
+  stop
+endif
+legend right
+  Voluntary disruptions (drains, rolling
+  updates) never break :global/Horde quorum
+  or exceed handoff throughput.
+endlegend
+@enduml

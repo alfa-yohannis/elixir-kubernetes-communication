@@ -1,0 +1,37 @@
+% project-status.tex — \input dari report.tex (lampiran)
+\chapter{Status Proyek}
+\label{ch:status}
+
+Lampiran ini merekam status pengerjaan sebagai titik lanjut. Pada daftar di bawah,
+\cbdone\ berarti selesai dan \cbtodo\ berarti belum.
+
+\section{Yang Telah Diselesaikan}
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbdone] Taksonomi komunikasi (kategori A--E) dan pembagian peran OTP vs.\
+        Kubernetes (Bagian~\ref{sec:komunikasi}).
+  \item[\cbdone] Lima titik gesekan beserta skenario kontekstual dan diagramnya
+        (Bab~\ref{ch:problems}).
+  \item[\cbdone] Pertanyaan penelitian RQ1--RQ5 dan sembilan mekanisme kandidat
+        M1--M9 (Bab~\ref{ch:problems}, Bab~\ref{ch:mechanisms}).
+  \item[\cbdone] Uji-tekan kebaruan melalui tinjauan pustaka sistematis (24 sumber,
+        15 klaim terkonfirmasi; keyakinan sedang) (Bab~\ref{ch:litreview}).
+\end{itemize}
+
+\section{Temuan Riset Utama}
+\begin{itemize}[leftmargin=1.4em,nosep]
+  \item Celah yang dapat dipertahankan adalah \emph{koordinasi antara kedua otoritas
+        pemulihan}, bukan primitif individualnya yang semuanya sudah ada.
+  \item M5 paling lemah: Akka sudah memakai \emph{Kubernetes Lease} sebagai arbiter
+        \emph{split-brain}~\cite{akkaLease}; jembatan keanggotaan$\rightarrow$\emph{readiness}
+        (M4) juga sudah ada di Akka~\cite{akkaHealth}.
+  \item Taruhan kebaruan teraman: M3 + M7 + M8, ditambah bagian M4 yang khas BEAM.
+  \item M1/M9 harus mengutip dan membedakan diri dari~\cite{roberts2025}.
+\end{itemize}
+
+\section{Belum Selesai / Perlu Verifikasi Ulang}
+\begin{itemize}[leftmargin=2.2em,nosep]
+  \item[\cbtodo] Verifikasi ulang tiga petunjuk yang sempat \emph{abstain}:
+        \texttt{akkadotnet-healthcheck} (.NET), Beamlens, dan Akka Coordination-Lease CRD.
+  \item[\cbtodo] Telusuri Google Scholar / DBLP / IEEE~Xplore sebelum pengiriman.
+  \item[\cbtodo] Lanjutkan ke Fase~0--1 pada peta jalan (Lampiran~\ref{ch:roadmap}).
+\end{itemize}

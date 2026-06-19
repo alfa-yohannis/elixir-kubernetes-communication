@@ -53,6 +53,24 @@ Algoritma~\ref{alg:p1} memformalkan akarnya: vonis \textit{HEALTHY} pada baris~2
 bergantung pada \textsc{TcpAccept}, tanpa sama sekali menyentuh keadaan \emph{pool} pekerja
 atau \emph{supervision tree}---inilah celah semantik yang ditutup M1 dan M9.
 
+\subsection{Ilustrasi Sederhana}
+\label{subsec:p1-ilustrasi}
+Aplikasi \emph{PayGate} memanggil API \emph{fraud} lewat \emph{connection pool} (sekumpulan
+koneksi siap-pakai ke layanan luar). Langkahnya:
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item API \emph{fraud} menggantung---tidak membalas dan tanpa batas waktu---sehingga satu
+        per satu pekerja di \emph{pool} ikut menunggu selamanya, hingga semua pekerja habis
+        dan setiap pembayaran macet.
+  \item Pada saat yang sama, kubelet (agen Kubernetes di tiap node yang menjalankan
+        pemeriksaan kesehatan) mengirim \emph{probe} TCP: ia hanya mengecek apakah \emph{port}
+        4000 mau menerima koneksi.
+  \item Karena server web (Cowboy) tetap menerima koneksi di \emph{port} itu---menerima
+        koneksi adalah pekerjaan yang terpisah dari memprosesnya---\emph{probe} lulus, dan
+        Kubernetes menyimpulkan \emph{pod} sehat.
+\end{enumerate}
+\noindent Akar masalahnya: \emph{probe} hanya bertanya ``\emph{port}-nya hidup?'', bukan
+``aplikasinya masih mengerjakan sesuatu?''. Inilah yang diperbaiki M1 dan M9.
+
 \section{Pemulihan Ganda}
 \label{sec:p2}
 Pada \emph{ingester} telemetri IoT \emph{SensorHub}, sebuah \emph{frame} cacat membuat
@@ -90,6 +108,23 @@ kegagalan, dan begitu \emph{ya}, kepemilikan berpindah ke Kubernetes melalui kel
 Algoritma~\ref{alg:p2} sengaja ditulis ``naif'': baris~2 selalu me-\emph{restart} tanpa
 memeriksa jatah, dan komentar baris~3 menyorot bahwa lapis orkestrator tak pernah
 diberi tahu---persis ketiadaan kebijakan kepemilikan yang ditangani M2.
+
+\subsection{Ilustrasi Sederhana}
+\label{subsec:p2-ilustrasi}
+Pada \emph{SensorHub}:
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Sebuah \emph{frame} (paket data) yang rusak dari perangkat membuat \emph{decoder}
+        (\emph{process} yang menerjemahkan data masuk) \emph{crash}.
+  \item Supervisor (\emph{process} pengawas yang otomatis menyalakan ulang anaknya saat
+        \emph{crash}) langsung menghidupkannya kembali; perangkat mengirim ulang \emph{frame}
+        rusak yang sama, \emph{decoder} \emph{crash} lagi, dihidupkan lagi---berputar terus.
+  \item Selama VM BEAM tetap hidup, Kubernetes tak melihat masalah apa pun (\emph{probe}
+        lulus) sehingga diam saja. Bila jatah \emph{restart} (\texttt{max\_restarts}) diatur
+        wajar, supervisor akhirnya menyerah dan VM keluar, barulah Kubernetes me-\emph{restart}
+        \emph{pod}.
+\end{enumerate}
+\noindent Akar masalahnya: tak ada kesepakatan lapis mana yang ``memiliki'' kegagalan ini,
+sehingga bisa terjadi pemulihan berulang yang sia-sia. Ditangani M2 dan M8.
 
 \section{\emph{Readiness} vs.\ Pembentukan \emph{Cluster}}
 \label{sec:p3}
@@ -130,6 +165,42 @@ siap segera setelah \textsc{BindPort}, sementara \textsc{OnRequest} (baris~5) me
 \textsc{Lookup} yang mengembalikan \emph{notFound} atau bahkan mendaftarkan \emph{singleton}
 duplikat---akibat langsung dari penandaan siap yang prematur, yang diperbaiki M4.
 
+\subsection{Ilustrasi Sederhana}
+\label{subsec:p3-ilustrasi}
+\emph{ArenaServer} adalah \emph{backend} sebuah permainan daring \emph{real-time} berbasis
+pertandingan---bayangkan game pertarungan arena (sejenis MOBA atau \emph{battle royale})
+tempat banyak pemain bermain bersama dalam satu pertandingan. Tiap pertandingan yang sedang
+berlangsung diwakili oleh satu \emph{process} di BEAM yang menyimpan keadaan permainan (skor,
+posisi pemain, dan sebagainya).
+
+Karena pemain berdatangan melalui \emph{load balancer}, dua pemain dalam pertandingan yang
+sama bisa saja tersambung ke \emph{pod} yang berbeda. Agar keduanya tetap dilayani oleh
+\emph{process} pertandingan yang sama, \emph{pod}-\emph{pod} itu harus saling mengenal dan
+membentuk satu \emph{cluster} BEAM---\textbf{inilah mengapa \emph{peer} diperlukan}: tanpa
+mengetahui rekan-rekannya, sebuah \emph{pod} tak bisa menemukan pertandingan yang sebenarnya
+berjalan di \emph{pod} lain. \textbf{Mengapa perlu sinkronisasi}: daftar ``pertandingan~$X$
+berjalan di \emph{pod}~$Y$'' harus diketahui seragam oleh semua \emph{pod}, dan Horde menjaga
+daftar (\emph{registry}) ini tetap tersinkron sehingga tiap \emph{pod} dapat mengarahkan
+pemain ke tempat yang benar. \textbf{Mengapa perlu \emph{rolling deploy}}: memperbarui game
+(versi baru, perbaikan bug) dilakukan bertahap agar layanan tetap hidup tanpa
+\emph{downtime}; \emph{pod} lama diganti \emph{pod} baru sedikit demi sedikit---dan di sinilah
+\emph{pod} baru bermunculan, yang harus bergabung ke \emph{cluster} lebih dulu sebelum layak
+melayani. Masalahnya muncul pada langkah berikut:
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Sebuah \emph{pod} baru dinyalakan; ia mengikat \emph{port} dan langsung menandai
+        diri ``siap'' (\emph{ready}) semata karena \emph{port}-nya terbuka.
+  \item Kubernetes pun mengarahkan pemain ke \emph{pod} itu---padahal \emph{pod} belum
+        bergabung ke \emph{cluster}: libcluster (yang menemukan antar-\emph{pod}) belum
+        menemukan rekan, dan \emph{registry} Horde belum tersinkron.
+  \item Ketika pemain mencari pertandingannya (yang dipegang sebagai \emph{singleton}---satu
+        \emph{process} unik untuk pertandingan itu di seluruh \emph{cluster}), \emph{pod} ini
+        tak menemukannya (\emph{registry}-nya masih kosong), lalu menjawab ``pertandingan
+        tak ada'' atau malah membuat \emph{process} duplikat yang memecah pertandingan.
+\end{enumerate}
+\noindent Akar masalahnya: ``siap'' ditandai terlalu dini---\emph{port} terbuka belum berarti
+siap melayani karena \emph{cluster} belum terbentuk. Diperbaiki M4, yang menahan status
+``siap'' sampai \emph{pod} benar-benar tergabung dan \emph{registry} tersinkron.
+
 \section{Churn \emph{Rolling-Deploy}: \emph{Handoff} vs.\ \emph{Grace Period}}
 \label{sec:p4}
 Pada editor kolaboratif \emph{CoEdit}, tiap dokumen adalah \emph{process} \emph{stateful}
@@ -166,6 +237,59 @@ waktu: baris~2 memulai pewaktu 30\,s, perulangan baris~3 melakukan 400 \emph{han
 yang totalnya $\approx$45\,s, dan kondisi baris~4 memicu \textsc{Sigkill} begitu tenggat
 terlewati---ketiadaan kopling antara durasi \emph{handoff} dan \emph{grace} inilah yang
 dijembatani M3.
+
+\subsection{Ilustrasi Sederhana}
+\label{subsec:p4-ilustrasi}
+Untuk pembaca yang baru mengenal Kubernetes, alur masalah ini ditelusuri langkah demi
+langkah dengan angka konkret. Misalkan sebuah \emph{pod} (wadah berisi satu salinan aplikasi
+yang dijadwalkan dan dikelola Kubernetes) menjalankan 400 \emph{process} (unit eksekusi
+sangat ringan di dalam VM BEAM---mesin virtual tempat Elixir berjalan---sehingga satu
+aplikasi lazim menjalankan ratusan ribu sekaligus, berbeda dari proses sistem operasi yang
+``berat''), dan tiap \emph{process} memegang \emph{state}: data yang sedang ditahannya di
+memori, di sini suntingan dokumen yang belum tersimpan ke basis data. Ketika Kubernetes
+memutuskan mematikan \emph{pod} ini (misalnya karena \emph{rolling update}, yakni pembaruan
+bertahap yang mengganti \emph{pod} satu per satu ketika ada versi baru aplikasi, perubahan
+konfigurasi, atau pembaruan lain), terjadi rangkaian berikut (Tabel~\ref{tab:p4-timeline}):
+
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Pada detik ke-0, Kubernetes mengirim \texttt{SIGTERM} (sinyal yang meminta proses
+        berhenti dengan sopan---aplikasi masih diberi kesempatan membereskan diri lebih
+        dulu) dan memulai pewaktu \emph{grace} (jatah waktu agar aplikasi sempat selesai
+        sebelum dimatikan paksa) selama 30~detik; \emph{pod} lalu berhenti menerima koneksi
+        baru (disebut \emph{drain}---menuntaskan permintaan yang sedang berjalan sambil
+        menolak yang baru).
+  \item \emph{Pod} mulai memindahkan ke-400 \emph{process} beserta \emph{state}-nya ke node
+        lain (mesin lain---fisik atau virtual---tempat \emph{pod} dijalankan, satu dari
+        banyak node dalam \emph{cluster}) melalui \emph{handoff} (pemindahan \emph{process}
+        beserta datanya ke node lain agar tidak ikut hilang saat \emph{pod} mati, dikelola
+        oleh Horde---pustaka Elixir yang mengatur \emph{process} secara terdistribusi
+        lintas-node dan memindahkannya otomatis ketika sebuah node hilang); karena tiap
+        pemindahan harus menyalin \emph{state}, seluruhnya butuh sekitar 45~detik.
+  \item Pada detik ke-30 pewaktu \emph{grace} habis, sehingga Kubernetes mengirim
+        \texttt{SIGKILL} (sinyal mematikan paksa yang tidak bisa ditolak atau ditunda
+        aplikasi) dan \emph{pod} mati seketika---memotong pemindahan yang baru selesai
+        $\approx$67\%.
+\end{enumerate}
+
+\begin{table}[H]\centering\small
+\caption{Garis waktu terminasi pada Bagian~\ref{sec:p4} (\emph{handoff} 45~s vs.\ \emph{grace} 30~s).}
+\label{tab:p4-timeline}
+\begin{tabular}{@{}p{0.16\linewidth}p{0.78\linewidth}@{}}
+\toprule
+\textbf{Waktu} & \textbf{Kejadian} \\
+\midrule
+$t = 0$~s & \texttt{SIGTERM} (minta berhenti sopan); pewaktu \emph{grace} mulai; \emph{pod} berhenti menerima koneksi (\emph{drain}) \\
+$t = 0$--$45$~s & \emph{Handoff} 400 \emph{process}+\emph{state} ke node lain ($\approx$9 \emph{process}/detik) \\
+$t = 30$~s & Pewaktu \emph{grace} habis $\rightarrow$ \texttt{SIGKILL} (mematikan paksa) $\rightarrow$ \emph{pod} mati seketika \\
+Akibat & $\approx$150 \emph{process} yang belum dipindah mati bersama \emph{state}-nya (data hilang) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Akar persoalannya: nilai \emph{grace} (30~detik) ditetapkan \textbf{statis}, tanpa
+mengetahui bahwa \emph{handoff} sesungguhnya butuh 45~detik. Perbaikannya---mekanisme M3
+(Bab~\ref{ch:mechanisms})---menghitung \emph{grace} secara dinamis dari jumlah \emph{process}
+dan laju \emph{handoff}, sehingga tenggat selalu cukup dan tak ada \emph{state} yang hilang.
 
 \section{\emph{Split-Brain}}
 \label{sec:p5}
@@ -204,6 +328,22 @@ menunjukkan kedua sisi mendaftar dan Kubernetes diam; \textsc{OnHeal} (baris~5) 
 \textsc{Global.ResolveConflict} yang membunuh satu duplikat sehingga state-nya hilang.
 Ketidaksepakatan antara model kesehatan orkestrator (semua hijau) dan model keanggotaan
 BEAM (terpecah) inilah yang menjadi sasaran M5.
+
+\subsection{Ilustrasi Sederhana}
+\label{subsec:p5-ilustrasi}
+Pada \emph{TopScore}:
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Jaringan terputus dan memecah \emph{cluster} menjadi dua kelompok \emph{pod} yang
+        tak saling melihat; tiap sisi mengira sisi lain mati (\emph{nodedown}).
+  \item Tiap sisi tetap melayani dan masing-masing membuat papan-peringkat (\emph{singleton})
+        sendiri, sehingga ada dua salinan yang sama-sama menerima skor.
+  \item \emph{Probe} Kubernetes ke tiap \emph{pod} tetap lulus---karena \emph{probe} bersifat
+        lokal per-\emph{pod}---jadi Kubernetes tak melihat ada yang salah.
+  \item Saat jaringan pulih, mekanisme penyelesaian konflik membunuh salah satu duplikat,
+        dan skor yang terlanjur dikumpulkannya ikut hilang.
+\end{enumerate}
+\noindent Akar masalahnya: Kubernetes melihat ``semua sehat'' sementara BEAM melihat
+``terpecah''---kedua model tak sepakat. Disasar M5.
 
 \section{Pertanyaan Penelitian}
 \label{sec:rq}

@@ -46,6 +46,19 @@ $\tau$ dan bendera \textit{wedged}; bila terpenuhi, baris~4 mengembalikan \textt
 selainnya baris~6 mengembalikan \texttt{200}---memetakan kesehatan supervisi langsung ke
 semantik \emph{probe}.
 
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m1-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Saat kubelet menanyakan kesehatan lewat \texttt{/healthz}, aplikasi tidak menjawab
+        asal ``hidup''.
+  \item Ia memeriksa \emph{supervision tree} miliknya (peta \emph{process} dan pengawasnya):
+        adakah bagian penting yang macet atau terus-menerus \emph{crash}?
+  \item Bila ada, ia menjawab ``tidak sehat'', sehingga Kubernetes berhenti mengirim lalu
+        lintas ke \emph{pod} itu atau me-\emph{restart}-nya.
+\end{enumerate}
+\noindent Intinya: jawaban \emph{probe} berasal dari kesehatan internal yang sebenarnya,
+bukan sekadar \emph{port} yang terbuka---kebalikan dari Masalah~1.
+
 \section{M2 --- Delegasi Kepemilikan Kegagalan}
 \label{sec:m2}
 Sebuah pengklasifikasi memutuskan lapis mana (supervisor OTP atau pengendali Kubernetes)
@@ -76,6 +89,17 @@ kegagalan. Algoritma~\ref{alg:m2} memformalkannya: baris~2 mengklasifikasi $f$; 
 kelasnya \textit{process} (baris~3), baris~4 me-\emph{restart} via OTP \emph{tanpa}
 memberi tahu Kubernetes; selainnya baris~6 membuat OTP mundur dan menyerahkan pemulihan
 ke Kubernetes---kontrak ``satu kegagalan, satu otoritas''.
+
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m2-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Ketika sebuah kegagalan muncul, sebuah ``penilai'' mengelompokkannya: kegagalan
+        kecil di tingkat \emph{process}, atau besar di tingkat mesin/sumber daya.
+  \item Kalau kecil, OTP (supervisor) yang menanganinya dan Kubernetes tidak diberi tahu.
+        Kalau besar, OTP mundur dan Kubernetes yang me-\emph{restart} \emph{pod}.
+\end{enumerate}
+\noindent Intinya: satu kegagalan ditangani tepat oleh satu lapis, sehingga tidak ada kerja
+pemulihan ganda.
 
 \section{M3 --- Pengendali Umpan-Balik: \emph{Grace} $\leftrightarrow$ Konvergensi $\leftrightarrow$ \emph{Probe}}
 \label{sec:m3}
@@ -111,6 +135,17 @@ Algoritma~\ref{alg:m3} memerincinya: baris~2 menghitung \emph{grace} $g$ sebagai
 konvergensi, dan batas bawah $g_{\min}$); baris~3 menetapkan \emph{grace} dan men-\emph{pace}
 \texttt{maxUnavailable}; baris~4 men-\emph{drain} saat \texttt{SIGTERM}; perulangan
 baris~5--7 melanjutkan \emph{handoff} hingga tuntas.
+
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m3-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Sebelum mematikan \emph{pod}, pengendali mengukur dua hal: berapa banyak
+        \emph{process} yang harus dipindah, dan seberapa cepat pemindahannya.
+  \item Dari situ ia menghitung tenggat (\emph{grace}) yang cukup---misalnya bila perlu
+        45~detik, beri 50~detik---bukan angka tetap 30~detik.
+\end{enumerate}
+\noindent Intinya: tenggat disesuaikan dengan beban nyata, sehingga \emph{handoff} selalu
+selesai dan tak ada \emph{state} yang hilang (kebalikan dari Masalah~4).
 
 \section{M4 --- \emph{Operator} Sadar-\emph{Cluster} BEAM + Jembatan Kesehatan}
 \label{sec:m4}
@@ -148,6 +183,18 @@ memformalkannya: \emph{loop} \textsc{Reconcile} (baris~1--3) terus memantulkan s
 \emph{finalizer}, memicu \emph{handoff}, menunggu hingga selesai \emph{atau} \emph{timeout},
 baru melepas \emph{finalizer}.
 
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m4-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Sebuah \emph{operator} (program kecil yang mengawasi dan mengatur sumber daya
+        Kubernetes) terus memantau keanggotaan \emph{cluster} BEAM.
+  \item Ia menandai \emph{pod} ``siap'' hanya setelah \emph{pod} benar-benar bergabung ke
+        \emph{cluster}; dan saat \emph{pod} hendak dimatikan, ia menahan penghapusan sampai
+        \emph{handoff} selesai.
+\end{enumerate}
+\noindent Intinya: Kubernetes baru mengirim lalu lintas ketika \emph{pod} benar-benar siap,
+dan tidak mematikannya sebelum datanya aman---menutup Masalah~3 dan~4.
+
 \section{M5 --- Arbiter \emph{Split-Brain} via \emph{Lease}/etcd}
 \label{sec:m5}
 Saat partisi, tiap sisi mencoba mengambil \emph{Kubernetes Lease} (didukung etcd); hanya
@@ -180,6 +227,17 @@ memerincinya: baris~2 mencoba \textsc{AcquireLease}; bila berhasil, baris~3 teta
 otoritatif; selainnya baris~5 menghentikan \emph{singleton} (mundur sebagai minoritas)---
 mengganti \emph{last-writer-wins} yang merusak dengan \emph{fencing} terprinsip.
 
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m5-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Saat jaringan terpecah, tiap sisi berebut mengambil satu ``kunci'' tunggal yang
+        disimpan Kubernetes (\emph{Lease}, didukung etcd---penyimpanan pusat Kubernetes).
+  \item Hanya satu sisi yang berhasil memegang kunci itu, dan hanya sisi itu yang berhak
+        melanjutkan; sisi lain berhenti (\emph{fence}) sehingga tidak ada salinan ganda.
+\end{enumerate}
+\noindent Intinya: ada satu wasit tepercaya yang memutuskan sisi mana yang berkuasa,
+mencegah \emph{split-brain} (kebalikan dari Masalah~5).
+
 \section{M6 --- Satu Spesifikasi Deklaratif $\rightarrow$ OTP + Manifes K8s}
 \label{sec:m6}
 Satu spesifikasi toleransi kesalahan dikompilasi menjadi spesifikasi supervisi OTP
@@ -209,6 +267,18 @@ supervisi OTP (strategi, \texttt{max\_restarts}, \emph{shutdown}); baris~3 memba
 manifes Kubernetes (\emph{probe}, PDB, \emph{grace}, \emph{anti-affinity}); baris~4
 mengembalikan pasangan yang konsisten \emph{by construction}, sehingga \emph{drift}
 mustahil terbentuk.
+
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m6-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Pengembang menulis \emph{satu} berkas yang menyatakan niat pemulihan (misalnya
+        ``\emph{process} ini menyimpan \emph{state}, butuh kuorum sekian, pindahkan---jangan
+        sekadar di-\emph{restart}'').
+  \item Sebuah \emph{compiler} menerjemahkan berkas itu menjadi dua keluaran sekaligus:
+        konfigurasi OTP dan berkas Kubernetes (\emph{manifest}).
+\end{enumerate}
+\noindent Intinya: satu sumber kebenaran membuat kedua lapis selalu sinkron---ubah sekali,
+keduanya ikut berubah, sehingga tidak ada \emph{drift}.
 
 \section{M7 --- PDB/maxUnavailable $\leftrightarrow$ Kuorum BEAM}
 \label{sec:m7}
@@ -241,6 +311,19 @@ keputusan \emph{allow}/\emph{block} mengalir balik. Diagram aktivitas
 \texttt{maxUnavailable} ke kapasitas \emph{handoff}; \textsc{OnEviction} (baris~4--6)
 menolak bila melanggar kuorum, selainnya mengizinkan lalu mela\-kukan \emph{handoff}.
 
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m7-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Pengendali menghitung berapa \emph{pod} minimum yang harus tetap hidup agar
+        \emph{cluster} BEAM tidak kehilangan kuorum (jumlah suara mayoritas yang diperlukan
+        agar \emph{cluster} tetap berwenang).
+  \item Angka itu ditulis ke \emph{PodDisruptionBudget} (aturan Kubernetes tentang berapa
+        \emph{pod} boleh dimatikan saat pemeliharaan).
+  \item Ketika ada \emph{drain} atau pembaruan, Kubernetes menolak mematikan \emph{pod} bila
+        akan melanggar batas itu.
+\end{enumerate}
+\noindent Intinya: pemeliharaan terjadwal tak pernah memutus kuorum BEAM.
+
 \section{M8 --- Eskalasi \emph{Restart-Budget} Adaptif $\leftrightarrow$ \emph{Backoff} K8s}
 \label{sec:m8}
 Sebuah pengendali menyetel \texttt{max\_restarts}/\texttt{max\_seconds} OTP menurut laju
@@ -269,6 +352,18 @@ memerincinya: \emph{loop} baris~1--4 mengamati \emph{fault rate} $r$, menghitung
 $(M_r,M_s)=f(r,\textit{hist})$, dan menyetelnya pada OTP; baris~5 menangani
 \textsc{IntensityExceeded} dengan mematikan pohon dan keluar non-nol---batas eskalasi yang
 terprinsip dan adaptif-beban.
+
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m8-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Pengendali mengamati seberapa sering kegagalan terjadi, lalu menyetel jatah
+        \emph{restart} OTP secara adaptif (mengetat saat sering gagal).
+  \item Selama masih dalam jatah, OTP yang menangani; begitu jatah habis (kegagalan
+        terus-menerus), VM keluar sehingga Kubernetes me-\emph{restart} \emph{pod} dengan
+        jeda yang makin lama (\emph{backoff}).
+\end{enumerate}
+\noindent Intinya: batas ``kapan menyerah ke Kubernetes'' ditentukan secara terukur dan
+mengikuti beban, bukan angka tetap (kebalikan dari Masalah~2).
 
 \section{M9 --- Sinyal \emph{Liveness} Komposit BEAM}
 \label{sec:m9}
@@ -299,3 +394,16 @@ $\sigma$ (utilisasi \emph{scheduler}, panjang \emph{run-queue}, \emph{mailbox}, 
 \emph{restart}); baris~3 menghitung \emph{composite progress score} $s$; baris~4
 mengembalikan \textit{unhealthy} bila $s<\theta$, selainnya \textit{healthy}---vonis yang
 mencerminkan kemajuan nyata, bukan sekadar \emph{port} terbuka.
+
+\subsection{Ilustrasi Sederhana}
+\label{subsec:m9-ilustrasi}
+\begin{enumerate}[nosep,leftmargin=2em]
+  \item Alih-alih \emph{probe} TCP, sebuah pengumpul (\emph{aggregator}) membaca beberapa
+        tanda vital VM BEAM: seberapa sibuk penjadwal, panjang antrean kerja
+        (\emph{run-queue}), tumpukan pesan di \emph{mailbox}, dan seberapa sering
+        \emph{process} \emph{crash}.
+  \item Dari semua itu ia menghitung satu skor ``apakah VM masih membuat kemajuan?''; bila
+        skor rendah, \emph{pod} dinyatakan tidak sehat.
+\end{enumerate}
+\noindent Intinya: mekanisme ini menangkap keadaan ``hidup tetapi macet'' yang lolos dari
+\emph{probe} biasa (kebalikan dari Masalah~1).

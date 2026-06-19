@@ -1,0 +1,443 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Paper M3 -- Target: Software: Practice and Experience (Wiley), Q2
+%% Closing the Grace Gap: an adaptive terminationGracePeriodSeconds controller
+%% coupling Kubernetes pod termination with BEAM cluster convergence
+%% (Horde handoff + libcluster convergence) for zero-loss rolling updates.
+%%
+%% Template: Wiley New Journal Design v5 (WileyNJDv5.cls). Style chosen via the
+%% \documentclass option (AMA = numeric). Do NOT add \bibliographystyle manually;
+%% the class sets it from the option.
+%%
+%% !! COMPILE WITH XeLaTeX (Wiley NJD v5 requires it for its fonts; TeX Live 2022).
+%%    latexmk -xelatex main.tex
+%%
+%% Data: ../data/   Figures: ../figures/   Artifact: ../code/   Plan: ../OUTLINE.md
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[AMA,Times1COL]{WileyNJDv5}
+% Style options (pick what SP&E mandates): AMA | APA | APS | AMS | Chicago |
+%   Harvard | MLA | MPS | Vancouver | WCMS.  Layout: Times1COL | LATO2COL | ...
+% AMA = numeric citations (sensible default for a CS systems paper); confirm with SP&E.
+
+\articletype{Original Article}%
+
+\received{Date Month Year}
+\revised{Date Month Year}
+\accepted{Date Month Year}
+\journal{Software: Practice and Experience}
+\volume{00}
+\copyyear{2026}
+\startpage{1}
+
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{subcaption}
+
+% hyperref and xcolor are already loaded by the WileyNJDv5 class; only set link colours here.
+\definecolor{navyblue}{RGB}{0,0,128}
+\hypersetup{colorlinks=true,allcolors=navyblue}
+
+\graphicspath{{figures/}{../figures/}}
+
+\lstdefinelanguage{Elixir}{
+  morekeywords={def,defp,defmodule,do,end,case,cond,fn,receive,after,when,
+    use,import,alias,require,GenServer,Supervisor,Horde,spawn,send,handle_info,
+    handle_call,handle_cast,init,true,false,nil},
+  sensitive=true, morecomment=[l]{\#}, morestring=[b]"
+}
+\lstset{basicstyle=\ttfamily\footnotesize, keywordstyle=\bfseries,
+  commentstyle=\itshape, showstringspaces=false, breaklines=true,
+  frame=lines, numbers=left, numberstyle=\tiny, numbersep=6pt, tabsize=2}
+
+\raggedbottom
+
+\begin{document}
+
+\title{Closing the Grace Gap: An Adaptive Termination-Grace Controller Coupling
+Kubernetes Pod Termination with BEAM Cluster Convergence for Zero-Loss Rolling Updates}
+
+\author[1]{Alfa Yohannis}
+\author[2]{Alexander Waworuntu}
+
+\authormark{YOHANNIS \textsc{and} WAWORUNTU}
+\titlemark{Closing the Grace Gap: Coupling Kubernetes Termination with BEAM Convergence}
+
+\address[1]{\orgdiv{Department of Informatics}, \orgname{Universitas Pradita},
+  \orgaddress{\city{Tangerang}, \country{Indonesia}}}
+\address[2]{\orgdiv{Department of Informatics}, \orgname{Universitas Multimedia Nusantara},
+  \orgaddress{\city{Tangerang}, \country{Indonesia}}}
+
+\corres{Alfa Yohannis, Department of Informatics, Universitas Pradita, Tangerang, Indonesia.
+  \email{alfa.ryano@pradita.ac.id}}
+
+%\fundingInfo{}
+
+\abstract[Abstract]{%
+Stateful services increasingly run on container orchestrators that add their own recovery on top of
+the application runtime's. When such a service is upgraded, or a machine is withdrawn for
+maintenance, an instance that is about to be removed must first migrate its in-memory state to
+surviving instances and let the cluster settle before it disappears. To bound this shutdown, the
+orchestrator grants a fixed, operator-chosen \emph{grace period} and then forcibly terminates the
+instance. We argue that a fixed grace period is structurally mismatched to this task: set it too low
+and forced termination interrupts the migration, losing state and availability; set it defensively
+high and every instance slows the rollout, making upgrades sluggish and resource-hungry. The time
+actually required is not a constant---it grows with the amount of state to migrate and with the load
+on the cluster---so no single value is right for all instances or all moments. We present a
+cross-layer feedback controller that \emph{derives} the grace period at run time from the runtime's
+own progress signals rather than guessing it in advance, and that paces the rollout accordingly. We
+formalise a safety condition relating the orchestrator's shutdown window to the runtime's migration
+and convergence time, provide an open reference implementation on Kubernetes, and evaluate it against
+fixed and over-provisioned baselines under fault injection;
+\textbf{[quantitative results---state loss eliminated; rollout-time overhead vs.\ over-provisioning;
+adaptivity---to be filled after the experiment runs]}.}
+
+\keywords{Kubernetes, Erlang/BEAM, Elixir/OTP, graceful shutdown, rolling update,
+fault tolerance, cross-layer coordination, Horde, libcluster}
+
+\maketitle
+
+%====================================================================
+\section{Introduction}\label{sec:intro}
+
+Services built on the Erlang BEAM virtual machine---most visibly through Elixir and the OTP
+framework---are organised as large numbers of lightweight processes under supervision trees that
+restart failed processes in microseconds. A growing number of these services are deployed on
+Kubernetes, which adds a second, coarser tier of fault tolerance: it restarts containers, reschedules
+pods, and replaces nodes. The two tiers are complementary, operating at different granularities and
+timescales, and stateful BEAM applications routinely rely on both at once: process state that must
+survive a pod's disappearance is held in distributed registries such as Horde~\cite{horde} and made
+discoverable through cluster-formation libraries such as libcluster~\cite{libcluster}.
+
+The two tiers must nonetheless cooperate at one specific moment: when a pod is deliberately removed.
+During a rolling update or a node drain, Kubernetes terminates a pod by sending \texttt{SIGTERM},
+optionally running a \texttt{preStop} hook, waiting for a bounded \emph{grace period}
+(\texttt{terminationGracePeriodSeconds}), and then sending \texttt{SIGKILL}~\cite{k8sgraceful}.
+A stateful BEAM pod must use that window to \emph{hand off} its processes to surviving pods and let
+the cluster re-converge (membership stabilises, registries reconcile, singletons re-register) before
+it disappears. The grace period therefore acts as a deadline on cross-tier handoff.
+
+The difficulty is that this deadline is a \emph{static constant chosen by the operator at deploy
+time}. If it is shorter than the handoff plus convergence time, \texttt{SIGKILL} interrupts the
+handoff and state is lost---registered singletons vanish and requests fail until the cluster
+re-converges. If it is set defensively high, the cost reappears at the other end: a rolling update
+advances only as fast as each pod's grace allows, so an over-long grace makes every deployment slow
+and resource-hungry. Crucially, the time actually required is not fixed: it grows with the number of
+stateful processes a pod holds, shrinks with the achievable handoff rate, and depends on cluster
+convergence time---all of which vary with load. A single constant cannot be simultaneously safe and
+efficient, and a fixed \texttt{preStop} sleep is equally blind. This is a cross-layer coordination
+gap: the orchestrator owns the deadline, the runtime owns the information that should set it, and
+nothing connects them.
+
+We close that gap with a \emph{grace-convergence controller}: a cross-layer feedback loop that
+\emph{derives} the grace period at run time from runtime convergence signals rather than guessing it
+in advance. A lightweight probe exposes the pod's handoff backlog, its observed handoff rate, and its
+membership-convergence state; a Kubernetes operator uses these to compute a per-pod grace period and
+to pace the rolling update; and an adaptive \texttt{preStop} hook drains and then blocks precisely
+until handoff completes instead of sleeping for a guessed interval. The result is a deadline that is
+just long enough to be safe and no longer.
+
+This paper makes the following contributions:
+\begin{enumerate}
+  \item A \emph{grace-safety invariant} that formalises, across the orchestrator/runtime boundary,
+        when a graceful termination is safe, and an analysis showing why both static and
+        over-provisioned grace periods are unsatisfactory (Section~\ref{sec:model}).
+  \item The design of a cross-layer grace-convergence controller, decomposed into runtime-agnostic
+        roles so that the principle transfers beyond the BEAM (Section~\ref{sec:design}).
+  \item A reference implementation as an open artifact---built from libcluster, Horde, a Kubernetes
+        operator, and an adaptive \texttt{preStop} hook (Section~\ref{sec:impl}).
+  \item An empirical evaluation on Kubernetes against static, over-provisioned, and fixed-sleep
+        baselines under fault injection, measuring state loss, rollout time, and adaptivity
+        (Section~\ref{sec:eval}).
+\end{enumerate}
+
+%====================================================================
+\section{Background and Motivation}\label{sec:bg}
+
+\subsection{Pod termination and rolling updates in Kubernetes}\label{sec:bg-k8s}
+Kubernetes terminates a pod through a fixed lifecycle~\cite{k8sgraceful}. The pod is marked
+\emph{Terminating} and removed from service endpoints; an optional \texttt{preStop} hook runs; the
+container receives \texttt{SIGTERM}; and after at most \texttt{terminationGracePeriodSeconds} (default
+30\,s) the container is forcibly killed with \texttt{SIGKILL}. The grace period is thus a hard upper
+bound on whatever cleanup the application performs after \texttt{SIGTERM}, including any \texttt{preStop}
+work. Deliberate removals happen routinely: a \emph{rolling update} replaces pods a few at a time,
+bounded by \texttt{maxUnavailable} and \texttt{maxSurge}, and a \emph{node drain} (for maintenance or
+scale-down) evicts every pod on a node. In all of these, the grace period governs how long each pod
+has to wind down cleanly.
+
+\subsection{Stateful clusters on the BEAM}\label{sec:bg-beam}
+A BEAM application is a cluster of nodes (one per pod, typically) whose processes are supervised
+intra-node by OTP and discovered inter-node through a membership layer such as
+libcluster~\cite{libcluster}, which forms the cluster from Kubernetes endpoints and must
+\emph{converge} after any topology change. Stateful work is commonly placed in a distributed
+registry and supervisor such as Horde~\cite{horde}, which uses delta-CRDTs so that, when a node
+leaves, the processes it owned can be \emph{handed off} and restarted on surviving nodes and
+cluster-wide singletons re-registered. Handoff and re-convergence are not instantaneous: their
+duration grows with the number of processes a departing node holds and with the time the membership
+and CRDT state take to stabilise. Practitioners report these graceful-shutdown and handoff concerns
+as first-order issues when running such systems on Kubernetes~\cite{souza2024dependable}.
+
+\subsection{The grace gap}\label{sec:bg-gap}
+Combining the two, a terminating stateful pod must complete drain, handoff, and re-convergence
+\emph{within} its grace period, or \texttt{SIGKILL} will cut it off mid-handoff
+(Figure~\ref{fig:problem}). Consider an illustrative deployment in which a pod hosts a few hundred
+stateful processes and, under the cluster's current load, handoff plus convergence takes about
+45\,s. With the default grace of 30\,s, \texttt{SIGKILL} arrives while roughly 150 processes are
+still in flight: their state is lost and the singletons they hosted are unavailable until the cluster
+re-converges. Raising the grace to, say, 300\,s removes the loss but makes every pod in a rolling
+update wait up to five minutes before the next can proceed. Because the required time tracks load,
+neither constant is right in general---motivating a grace period that is computed from the runtime's
+actual state rather than fixed in advance.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{grace-gap-problem.pdf}
+  \caption{The grace gap (illustrative scenario): a fixed 30\,s grace period forces \texttt{SIGKILL}
+  before an $\sim$45\,s handoff completes, so processes still in flight are killed and their recent
+  state is lost until the cluster re-converges. The scenario is illustrative.}\label{fig:problem}
+\end{figure}
+
+%====================================================================
+\section{System Model and Problem Definition}\label{sec:model}
+
+\subsection{Model}\label{sec:model-model}
+We consider a BEAM application running as a Kubernetes \emph{Deployment} of $n$ pods, each pod a
+cluster node. When a pod $p$ is selected for termination it must perform three actions before it can
+disappear safely:
+\begin{enumerate}
+  \item \emph{drain} in-flight requests, taking time $T_d(p)$;
+  \item \emph{hand off} the set $H_p$ of stateful processes it owns to surviving pods, at an
+        achievable rate $\rho(p)$ processes per second, taking time $|H_p|/\rho(p)$; and
+  \item allow the cluster to \emph{re-converge}---membership stabilises and registries reconcile---
+        taking time $T_c$.
+\end{enumerate}
+The orchestrator grants the pod a grace period $g$: it sends \texttt{SIGTERM} at time $0$ and
+\texttt{SIGKILL} at time $g$. Of these quantities, $|H_p|$, $\rho(p)$, $T_d(p)$ and $T_c$ are
+properties of the \emph{runtime under its current load}, whereas $g$ is set by the \emph{orchestrator};
+in standard practice $g$ is a single constant configured at deploy time and shared by all pods.
+
+\subsection{Grace-safety invariant}\label{sec:model-invariant}
+A termination is \emph{safe} (no handoff is truncated, no state is lost) only if the grace period
+covers drain, handoff, and convergence:
+\begin{equation}\label{eq:invariant}
+  g \;\ge\; T_d(p) \;+\; \frac{|H_p|}{\rho(p)} \;+\; T_c .
+\end{equation}
+The right-hand side is load-dependent and time-varying: it rises as a pod accumulates stateful
+processes ($|H_p|\!\uparrow$), as contention lowers the handoff rate ($\rho\!\downarrow$), or as a
+larger or busier cluster takes longer to converge ($T_c\!\uparrow$).
+
+\subsection{Why a constant fails}\label{sec:model-constant}
+A small static grace $g_0$ (e.g.\ the 30\,s default) violates Equation~\eqref{eq:invariant} whenever
+the load term $|H_p|/\rho(p)$ is large, producing exactly the truncated-handoff loss of
+Section~\ref{sec:bg-gap}. Over-provisioning ($g_0$ set to a large worst-case, e.g.\ 300\,s) restores
+safety but is pessimal for throughput: in a rolling update the wall-clock time is bounded below by the
+sum of the grace periods actually waited, so a grace far larger than needed directly inflates
+deployment time. The objective is therefore to choose, \emph{per pod and per termination}, the
+smallest $g$ that still satisfies Equation~\eqref{eq:invariant}:
+\begin{equation}\label{eq:objective}
+  g^\star(p) \;=\; T_d(p) \;+\; \frac{|H_p|}{\rho(p)} \;+\; T_c .
+\end{equation}
+Since the right-hand side is known only to the runtime and only at termination time, achieving
+$g \approx g^\star$ requires feeding runtime state across the boundary to the orchestrator---the
+controller of Section~\ref{sec:design}. We add a safety margin and bounds to
+Equation~\eqref{eq:objective} in the design rather than assume the terms are known exactly.
+
+%====================================================================
+% Reader-facing title carries NO internal label. (Internally this is mechanism M3
+% from the companion report; never surface "M3" to reviewers -- they don't know it.)
+\section{Design of the Grace-Convergence Controller}\label{sec:design}
+
+% Terminology convention: describe the mechanism by ROLE (runtime-agnostic) and
+% bind each role to a concrete component (Section~\ref{sec:impl}). Standard OS/
+% orchestrator terms (SIGTERM, grace period, rolling update, readiness probe) are
+% kept as-is. The role vocabulary makes the cross-layer principle portable and
+% sets up the comparison with other actor runtimes (Section~\ref{sec:related}).
+
+We describe the design in terms of \emph{roles}---runtime-agnostic
+responsibilities---and defer the concrete components that realise each role to
+Section~\ref{sec:impl}. Standard operating-system and orchestrator terms
+(\texttt{SIGTERM}, the \emph{grace period} \texttt{terminationGracePeriodSeconds},
+\emph{rolling update}, \emph{readiness probe}) are used unchanged. Table~\ref{tab:roles}
+fixes the role vocabulary and its mapping to our reference implementation; the same
+vocabulary lets us compare with other actor runtimes in Section~\ref{sec:related}.
+
+\begin{table}[t]
+\centering
+\caption{Roles in the mechanism and the concrete components that realise them.
+Roles are runtime-agnostic; the rightmost column is specific to our BEAM/Kubernetes
+reference implementation (Section~\ref{sec:impl}).}\label{tab:roles}
+\begin{tabular}{@{}p{0.30\linewidth}p{0.40\linewidth}p{0.22\linewidth}@{}}
+\toprule
+\textbf{Role} & \textbf{Responsibility} & \textbf{Component} \\
+\midrule
+Membership layer & Form the runtime cluster; signal membership convergence & libcluster \\
+Registry \& handoff layer & Hold stateful processes; hand them off on shutdown & Horde (delta-CRDT) \\
+Convergence probe & Expose handoff backlog, observed handoff rate $\rho$, convergence state & app endpoint \\
+Adaptive termination hook & On \texttt{SIGTERM}: drain, then block until handoff completes (not a fixed sleep) & preStop hook \\
+Coordinator (operator) & Watch pods; compute and patch the grace period; pace \texttt{maxUnavailable} & Bonny operator \\
+Grace-convergence controller \emph{(our contribution)} & Close the loop: set grace $g=f(\text{backlog},\rho,T_c)$ from runtime signals & --- (new) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Overview}\label{sec:design-overview}
+The controller turns Equation~\eqref{eq:objective} into a feedback loop that spans the
+orchestrator/runtime boundary. Three roles cooperate (Table~\ref{tab:roles}): a
+\emph{convergence probe} exposes the runtime quantities of Section~\ref{sec:model}; the
+\emph{coordinator} reads them and sets a per-pod grace period while pacing the rolling update; and
+an \emph{adaptive termination hook} ensures the pod actually uses the granted window to finish
+handoff instead of sleeping for a guessed interval. Figure~\ref{fig:seq} shows the message flow for a
+single termination and Figure~\ref{fig:act} the control loop.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{grace-convergence-sequence.pdf}
+  \caption{Message flow for one termination: before \texttt{SIGTERM}, the coordinator queries the
+  membership and handoff layers, derives an adequate grace period, and paces the rollout, so the
+  handoff completes before \texttt{SIGKILL}.}\label{fig:seq}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.40\linewidth]{grace-convergence-activity.pdf}
+  \caption{The control loop: measure runtime state, size the grace period and the rollout pace, then
+  drain and hand off, repeating while handoff is still pending, until a clean
+  shutdown.}\label{fig:act}
+\end{figure}
+
+\subsection{Convergence probe}\label{sec:design-probe}
+Each pod exposes a lightweight endpoint reporting (i) its current handoff backlog $B_p$ (the number of
+stateful processes it would need to hand off), (ii) a smoothed estimate of the achievable handoff rate
+$\rho_p$, and (iii) the membership layer's convergence state and a recent estimate of $T_c$. The rate
+is smoothed with an exponentially weighted moving average over recent handoff activity so that a
+transient stall does not produce a wildly large estimate. The probe is read-only and side-effect free,
+so it can be polled by the coordinator without perturbing the runtime.
+
+\subsection{Coordinator and grace computation}\label{sec:design-coord}
+The coordinator is a Kubernetes operator that watches Deployments and, when a rolling update or drain
+is about to remove a pod, reads that pod's probe and computes a grace period from
+Equation~\eqref{eq:objective} with a safety margin $\sigma$ and bounds (Algorithm~\ref{alg:grace}).
+The lower bound $g_{\min}$ preserves baseline drain behaviour; the upper bound $g_{\max}$ caps the wait
+so a misbehaving pod cannot stall a rollout indefinitely. The coordinator writes the computed value to
+the pod's \texttt{terminationGracePeriodSeconds} and \emph{paces} the update: it admits the next pod
+into the disruption only once the current pod reports handoff complete (or its grace elapses), so the
+rollout runs as fast as handoff allows and no faster.
+
+\begin{algorithm}[t]
+\caption{Adaptive grace computation and rollout pacing (coordinator side).}\label{alg:grace}
+\begin{algorithmic}[1]
+\Require margin $\sigma$, bounds $g_{\min}, g_{\max}$
+\Procedure{OnTerminate}{pod $p$}
+  \State $(B_p,\ \rho_p,\ T_c,\ T_d) \gets \Call{ReadProbe}{p}$
+  \State $g^\star \gets T_d + B_p/\rho_p + T_c + \sigma$ \Comment{Eq.~\eqref{eq:objective} with margin}
+  \State $g \gets \min\big(g_{\max},\ \max(g_{\min},\ g^\star)\big)$ \Comment{clamp to bounds}
+  \State \Call{SetGracePeriod}{$p, g$}
+  \State \Call{StartTermination}{$p$} \Comment{kubelet sends \texttt{SIGTERM}}
+  \State \textbf{wait until} \Call{HandoffComplete}{$p$} \textbf{or} $g$ elapsed
+  \State \Call{AdmitNextPod}{} \Comment{pace \texttt{maxUnavailable}}
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\subsection{Adaptive termination hook}\label{sec:design-hook}
+
+A granted grace period is useful only if the pod spends it finishing handoff rather than sleeping for
+a fixed interval (a common but blind \texttt{preStop} idiom). On \texttt{SIGTERM} the hook drains
+in-flight work and then blocks while handoff is pending, returning as soon as the backlog is cleared
+(Figure~\ref{fig:act}). Because the coordinator has already sized the grace period to cover the
+expected handoff, this block almost always returns well before $g_{\max}$; the cap exists only as a
+backstop.
+
+\subsection{Fail-safes and scope}\label{sec:design-failsafe}
+The controller is designed to degrade safely. If a probe is unavailable or returns implausible values,
+the coordinator falls back to a configured conservative grace (a default-safe, not default-fast,
+choice). The bounds $g_{\min}$ and $g_{\max}$ guarantee progress in both directions. Grace assignment
+and pacing are idempotent, so a coordinator restart during a rollout does not corrupt the update.
+The mechanism addresses \emph{voluntary} disruptions (rolling updates, drains, scale-down); sudden,
+non-graceful node death gives no grace window and is out of scope here. Coordinating disruption
+\emph{budgets} with cluster quorum is a complementary, orthogonal mechanism that we do not address in
+this paper.
+
+%====================================================================
+\section{Implementation}\label{sec:impl}
+% Stack: Elixir + Horde + libcluster + Bonny; K8s manifests (Deployment, preStop
+% hook, readiness gate, RBAC). Engineering details: measuring backlog & rho,
+% EWMA smoothing, debounce, per-pod grace patching, sudden-drain handling.
+% Artifact at ../code/ ; reproducibility archive at ../zenodo/.
+
+%====================================================================
+\section{Evaluation}\label{sec:eval}
+% RQ1 (correctness): how often does static 30s truncate handoff / lose state under
+%   varied load? Does M3 eliminate it?
+% RQ2 (efficiency): rollout-time overhead of M3 vs over-provisioned 300s.
+% RQ3 (adaptivity): does M3 track load changes without deadlock / zombie pods?
+% Setup: kind/k3s cluster; stateful workload; fault injection (repeated drain,
+%   node kill, CPU throttle to lower rho). Metrics: lost state, rolling-update
+%   duration, actual grace vs invariant, p99 handoff, premature SIGKILLs.
+% Baselines: (a) static 30s, (b) over-provisioned 300s, (c) preStop fixed sleep,
+%   (d) M3 adaptive. Tables/figures generated from ../data/ -> ../figures/.
+
+%====================================================================
+\section{Discussion and Threats to Validity}\label{sec:discuss}
+% Limits: rho/backlog estimation accuracy; bursty load; sudden (non-graceful)
+% node death is out of scope. Single-host emulated cluster (kind) is a validity
+% threat -- state it explicitly; optionally one cloud confirmation run.
+% Generalization: Akka CoordinatedShutdown, Orleans graceful deactivation.
+
+%====================================================================
+\section{Related Work}\label{sec:related}
+% Position M3 vs: dependable microservices in K8s (JISA 2024), RTilience (TSC
+% 2025), Istio resilience (Cluster Computing 2025), proactive stateful lifecycle
+% (Computer Communications 2025), eBPF-Shield (SOCA 2025/26), Akka Lease/SBR,
+% Glasgow SCM, Nefele. None tie grace to runtime convergence signals -> the gap.
+
+% [Prose to expand: cloud-native resilience / chaos engineering line of work treats
+% the orchestrator and the runtime separately; M3's novelty is the explicit feedback
+% coupling between them.]
+
+\subsection{Graceful shutdown in other actor runtimes}\label{sec:related-actors}
+% Use the ROLE vocabulary of Table~\ref{tab:roles} so the comparison is about
+% responsibilities, not product names. The point: peer runtimes already provide a
+% graceful-shutdown ROLE, but none DERIVE the orchestrator grace period from runtime
+% convergence signals -- they use configured/static timeouts. That is M3's gap.
+
+Other actor runtimes already provide a graceful-shutdown role. Akka's
+\emph{CoordinatedShutdown} runs ordered shutdown phases with per-phase
+timeouts~\cite{akkacoordinated}; Orleans performs graceful silo shutdown with grain
+deactivation~\cite{orleans}. In both, however, the timeouts are \emph{configured
+constants}, internal to the runtime, and are not fed back to the orchestrator's
+termination grace period---so the same grace gap we target can occur. Our controller differs by
+closing an explicit cross-layer feedback loop: the grace period is \emph{derived} at
+run time from convergence signals (handoff backlog, observed rate $\rho$, membership
+convergence) rather than guessed ahead of time (Table~\ref{tab:actor-compare}).
+A multi-runtime implementation is left to future work; here we evaluate the BEAM
+realisation and compare the others qualitatively.
+
+\begin{table}[t]
+\centering
+\caption{Graceful shutdown across actor runtimes, by role. Peers provide a
+shutdown role but use configured/static timeouts; only our controller derives the orchestrator
+grace period from runtime convergence signals.}\label{tab:actor-compare}
+\begin{tabular}{@{}p{0.26\linewidth}p{0.34\linewidth}p{0.15\linewidth}p{0.15\linewidth}@{}}
+\toprule
+\textbf{Runtime} & \textbf{Shutdown mechanism} & \textbf{Cross-layer coupling} & \textbf{Grace from convergence?} \\
+\midrule
+BEAM + Kubernetes (common practice) & preStop hook + static \texttt{terminationGracePeriodSeconds} & manual / static & No \\
+Akka & CoordinatedShutdown (phased, per-phase timeouts) & partial (runtime-internal) & No \\
+Orleans & graceful silo shutdown / grain deactivation & partial (runtime-internal) & No \\
+\textbf{This paper} & adaptive grace-convergence controller & \textbf{explicit feedback} & \textbf{Yes} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%====================================================================
+\section{Conclusion}\label{sec:conc}
+% Wrap up; point to M6/M7/M8 as the broader cross-layer coordination agenda.
+
+%====================================================================
+\bibliography{references}
+
+\end{document}

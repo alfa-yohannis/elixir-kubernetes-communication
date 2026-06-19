@@ -1,0 +1,16 @@
+@startuml grace-convergence-activity
+' Genuine PlantUML activity diagram (start/stop syntax). Standard UML theme (default colours).
+skinparam dpi 300
+
+start
+:rolling deploy triggered;
+:measure handoff backlog, throughput,\nand membership convergence;
+:compute and set grace period\n+ maxUnavailable;
+:SIGTERM pod; begin drain;
+repeat
+  :hand off processes;\nmonitor backlog;
+repeat while (handoff still pending?) is (yes)
+->no;
+:clean shutdown,\nno state loss;
+stop
+@enduml

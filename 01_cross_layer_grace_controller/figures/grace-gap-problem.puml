@@ -1,0 +1,31 @@
+@startuml grace-gap-problem
+' Standard UML theme (default colours/shapes).
+skinparam dpi 300
+title The grace gap: a fixed grace period can cut off an unfinished handoff
+
+participant "Deployment\ncontroller" as Dep
+participant "kubelet" as Kubelet
+participant "terminating pod\n(400 stateful procs)" as P2
+participant "Phoenix\nEndpoint" as EP
+participant "Horde" as Horde
+participant "surviving\nnode" as Surv
+actor Client
+
+Dep -> Kubelet: rolling update -> terminate pod
+Kubelet -> P2: SIGTERM
+note right of Kubelet: terminationGracePeriodSeconds = 30
+P2 -> P2: trap SIGTERM
+P2 -> EP: drain (stop accepting)
+P2 -> Horde: hand off 400 stateful processes
+
+loop each process (serialize + transfer CRDT state)
+  Horde -> Surv: transfer state
+end
+note over Horde,Surv: handoff takes ~45s under load
+
+Kubelet -> P2: SIGKILL (at t = 30s)
+note over P2: ~150 processes not yet moved\ndie with unsynced state
+
+Client -> Surv: reconnect
+Surv --> Client: state missing recent updates
+@enduml

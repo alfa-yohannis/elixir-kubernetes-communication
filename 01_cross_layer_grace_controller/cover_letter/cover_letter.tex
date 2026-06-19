@@ -1,0 +1,28 @@
+\documentclass[11pt,a4paper]{letter}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\signature{[Author One], on behalf of all authors}
+\address{[Institution]\\[City], [Country]\\\href{mailto:}{[email]}}
+
+\begin{document}
+\begin{letter}{The Editors\\Software: Practice and Experience\\John Wiley \& Sons}
+\opening{Dear Editors,}
+
+We submit our manuscript, \emph{``Closing the Grace Gap: An Adaptive Termination-Grace Controller
+Coupling Kubernetes Pod Termination with BEAM Cluster Convergence for Zero-Loss Rolling Updates,''}
+for consideration in \emph{Software: Practice and Experience}.
+
+% 2--3 short paragraphs:
+% (1) Problem & why it matters in practice: static terminationGracePeriodSeconds is blind to BEAM
+%     handoff/convergence, causing state loss on SIGKILL or slow rollouts.
+% (2) Contribution & artifact: a cross-layer feedback controller (Elixir+Horde+libcluster + Bonny
+%     operator + preStop hook), with a reproducible evaluation.
+% (3) Fit to SP&E: an engineering artifact built, operated, and measured -- practice and experience.
+\textbf{[Body -- to write once the abstract and results are settled.]}
+
+We confirm that this manuscript is original, not under consideration elsewhere, and that all authors
+approve the submission. We declare no conflicts of interest.
+
+\closing{Sincerely,}
+\end{letter}
+\end{document}

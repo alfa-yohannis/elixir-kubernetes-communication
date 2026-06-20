@@ -1,0 +1,9 @@
+policy,backlog,rate,need_s,grace_s,drain_ms,lost,completed
+static30,80,8,10.0,30,10082,0,true
+static300,80,8,10.0,300,10088,0,true
+prestop_sleep,80,8,10.0,30,10085,0,true
+m3,80,8,10.0,16,10085,0,true
+static30,160,4,40.0,30,30125,40,false
+static300,160,4,40.0,300,40167,0,true
+prestop_sleep,160,4,40.0,30,30129,40,false
+m3,160,4,40.0,46,40190,0,true

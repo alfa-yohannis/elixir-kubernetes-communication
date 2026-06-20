@@ -1,0 +1,12 @@
+kind,x,grace_s
+sigma,0,21
+sigma,5,26
+sigma,10,31
+sigma,15,36
+g_max,30,30
+g_max,60,60
+g_max,120,120
+g_max,300,206
+rho_error,0.5,46
+rho_error,1.0,26
+rho_error,2.0,16

@@ -1,0 +1,86 @@
+# The stateful Elixir/OTP app: headless Service (libcluster discovery), Deployment (with the
+# adaptive preStop hook + readiness probe), and a PodDisruptionBudget.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grace-cookie
+  namespace: default
+stringData:
+  RELEASE_COOKIE: "grace-cluster-cookie"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grace-headless
+  namespace: default
+spec:
+  clusterIP: None # headless: gives per-pod DNS for BEAM distribution
+  selector:
+    app: grace
+  ports:
+    - name: http
+      port: 4000
+    - name: epmd
+      port: 4369
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grace
+  namespace: default
+  labels: { app: grace }
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: grace }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1 # paced by the operator
+      maxSurge: 1
+  template:
+    metadata:
+      labels: { app: grace }
+    spec:
+      serviceAccountName: grace
+      # initial grace; the operator patches this to match the runtime handoff need
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: grace
+          image: grace:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 4000 }
+            - { name: epmd, containerPort: 4369 }
+          env:
+            - name: GRACE_ROLE
+              value: "app"
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: RELEASE_DISTRIBUTION
+              value: "name"
+            - name: RELEASE_NODE
+              value: "grace@$(POD_IP)"
+            - name: RELEASE_COOKIE
+              valueFrom: { secretKeyRef: { name: grace-cookie, key: RELEASE_COOKIE } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 4000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 4000 }
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                # block termination until the adaptive drain finishes the handoff
+                command: ["/bin/sh", "-c", "wget -q -O- --post-data='' http://127.0.0.1:4000/drain || true"]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: grace
+  namespace: default
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: { app: grace }

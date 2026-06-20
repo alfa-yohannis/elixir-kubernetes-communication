@@ -1,6 +1,12 @@
 # Outline Paper M3 — Target: SP&E (Software: Practice and Experience)
 
-> **Status:** draft outline. Target venue **SP&E** (Wiley) — Q2, IF 3,77, **hybrid (gratis via jalur
+> ⚠️ **SUPERSEDED — historical planning doc.** The actual paper is `paper/main.tex` (20 pages, built
+> clean). It expanded beyond this plan: **RQ1–RQ7** (not RQ1–3) + **Proposition 1** (safety proof);
+> the coordinator is a **`kubectl`-based GenServer operator, NOT Bonny**; the title is *"Closing the
+> Grace Gap: …Zero-Loss Rolling Updates"*; and the reader-facing text uses **no "M3" label**. The
+> venue strategy below is still current. Treat the section structure here as the original sketch.
+>
+> **Status (original):** draft outline. Target venue **SP&E** (Wiley) — Q2, IF 3,77, **hybrid (gratis via jalur
 > langganan)**, scope *practical software engineering, runtime systems, deployment tooling, real-world
 > experience*. (Catatan: JISA dicoret — jurnal sudah tutup.) Cadangan: **CCPE** (Wiley, Q2, gratis via
 > langganan) lalu **The Journal of Supercomputing** (Springer, Q2, gratis via langganan, paling mudah ditembus).

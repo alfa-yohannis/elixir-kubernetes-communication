@@ -1,0 +1,4 @@
+policy,pods,backlog,rate,rollout_ms,lost
+static30,3,400,10,90593,309
+static300,3,400,10,121924,0
+m3,3,400,10,121925,0

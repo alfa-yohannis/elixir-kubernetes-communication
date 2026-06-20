@@ -37,7 +37,8 @@
 - Describe the mechanism by **role** (runtime-agnostic) in concept/design; **bind role→concrete
   component in the Implementation section**. See `\ref{tab:roles}` in `paper/main.tex`.
 - Roles: membership layer (=libcluster), registry & handoff layer (=Horde), coordinator/operator
-  (=Bonny), convergence probe, adaptive termination hook, grace-convergence controller (=our new bit).
+  (=a **`kubectl`-based GenServer operator**, `GraceConvergence.Operator` — NOT Bonny, despite the dep
+  being present), convergence probe, adaptive termination hook, grace-convergence controller (=our new bit).
 - **Keep standard OS/orchestrator terms as-is** (SIGTERM, grace period, rolling update, readiness
   probe) — do NOT rename them to invented generic names; gloss once at first use. Over-abstraction
   hurts clarity/reproducibility.
@@ -62,6 +63,17 @@
   `akkaSBR`, `orleans`) and classic papers (`kephart2003`, `elnozahy2002`). The venue-research-sourced
   entries (`souza2024dependable`, `singh2025istio`, `gustafsson2025rtilience`, `meliani2025proactive`)
   should be re-checked against the publisher before submission.
+
+### Experiment gotchas (DO NOT REGRESS)
+- **Never `pkill -f '…@127.0.0.1'`** around the BEAM harnesses: the pattern matches the running
+  shell's own command line and kills it (exit 144, no output). Kill orphan beams by **PID**.
+- **`k8s/netem.sh`: pause the operator first** (`kubectl scale deploy/grace-operator --replicas=0`).
+  Otherwise the backlog the experiment creates makes the operator patch the grace → triggers a rolling
+  update → the leaver pod is killed mid-measurement (exit 137). The script does this + restores on exit.
+- Inject real latency by `nsenter`-ing into the pod netns from the kind node (`docker exec` → `crictl`
+  → `nsenter -t <pid> -n tc netem`); delay **survivor egress**, not the leaver (delaying the leaver
+  breaks the `rpc` helper's distribution connection).
+- Paper now **20 pages, RQ1–RQ7 + Proposition 1**; build clean, 0 undefined; all floats referenced.
 
 ## Open decisions
 - Confirm SP&E reference style: AMA (numeric) chosen as default; capital- and lowercase `.bst`

@@ -25,7 +25,7 @@ Extracted from `Wiley_New_Journal_Design_version_5__NJD_v5_.zip`:
 - `lettersp.sty`, `NJDnatbib.sty`, `NJDapacite.sty`, `mla.sty` — Wiley-specific support packages.
 - `empty.pdf`, `empty.eps`, `rhlogo.jpg` — template assets.
 
-### Three fixes applied (so it compiles on Linux/TeX Live 2023) — DO NOT REGRESS
+### Four fixes applied (so it compiles on Linux/TeX Live 2023) — DO NOT REGRESS
 1. The zip ships `LETTERSP.STY` (uppercase) but the class loads `lettersp.sty` — we added a
    lowercase copy (Linux is case-sensitive). **Keep `lettersp.sty`.**
 2. Removed the zip's bundled generic styles (`listings.sty`, `natbib.sty`, `algorithm.sty`,
@@ -35,13 +35,22 @@ Extracted from `Wiley_New_Journal_Design_version_5__NJD_v5_.zip`:
 3. The class emits `\bibstyle{WileyNJD-AMA}` (capital `W`) but the zip's file is
    `wileyNJD-AMA.bst` (lowercase `w`). We added capital-`W` copies `WileyNJD-*.bst` so bibtex
    resolves the style on any case-sensitive setup. **Keep both cases.**
+4. `WileyNJD-AMA.bst` **errors on an `@inproceedings` without an `organization` field**
+   (`` `organization' is a missing field, not a string ``) — this aborts bibtex, so the `.bbl`
+   is never built and a clean `latexmk` (e.g. VS Code LaTeX Workshop) fails with "undefined
+   citations". Every `@inproceedings` must include `organization` (and ideally `publisher`,
+   `address`). **Verify with a clean build, not a warm one:** `latexmk -C && latexmk -xelatex
+   main.tex`, then check `main.blg` for `error` — a stale `.bbl` can otherwise mask a bibtex error.
 
 ### Build status
 Verified: `xelatex → bibtex → xelatex → xelatex` exits 0, 0 undefined citations/refs, `main.pdf`
-builds (~9 pages). Prose is written through the Design section (Abstract, Introduction, Background
-incl. the problem figure and a "why current approaches fall short" subsection, System Model, and the
-full Design); Evaluation, Discussion, the prose body of Related Work, and Conclusion are still
-skeleton (guidance comments). See the top-level `README.md` for the done/not-done snapshot.
+builds (**20 pages**). The paper is **complete**: Abstract, Introduction, Background (incl. the
+problem figure and "why current approaches fall short" + `tab:existing`), System Model, Design (incl.
+Algorithm 1 + **Proposition 1**, the safety proof), **Implementation** (with Elixir/YAML listings),
+Evaluation (**RQ1–RQ7**: loss, efficiency, adaptivity, overhead, robustness, scalability/RQ6,
+real-latency/RQ7, fail-safe table), Discussion + **Practitioner guidance**, Related Work, Conclusion,
+and **Appendix A/B** (reproduction + listings). Every figure/table/algorithm/listing is referenced;
+0 undefined. See the top-level `README.md` for the full snapshot.
 
 > **Always build with XeLaTeX, never pdfLaTeX** (the v5 class needs XeLaTeX fonts).
 

@@ -51,6 +51,18 @@
 - **No fabricated/illustrative numbers.** Every result in `data/`/`figures/` comes from real runs
   (kind/k3s on the local i9/30 GB machine — confirmed sufficient).
 
+### References — must be real + must carry a URL (DO NOT hallucinate)
+- Every citation in `references.bib` must be a **real, accessible** work — verify the exact
+  arXiv ID / DOI / URL (e.g., via web search) before adding it. No invented papers, IDs, or DOIs.
+- **Every entry must carry a resolvable `url` (and `doi` where applicable)** — DOI, arXiv, or
+  official-doc link. All current entries are verified and URL-bearing; the WileyNJD-AMA style
+  renders them (DOIs via `\doibase`, docs via `\url`). Keep this when adding references.
+- Verified so far: `roberts2025` (arXiv:2507.02158, Glasgow SCM), `ucc23` (DOI 10.1145/3603166.3632139,
+  UCC'23), plus official docs (`k8sgraceful`, `k8sPDB`, `akkacoordinated`, `akkaHealth`, `akkaLease`,
+  `akkaSBR`, `orleans`) and classic papers (`kephart2003`, `elnozahy2002`). The venue-research-sourced
+  entries (`souza2024dependable`, `singh2025istio`, `gustafsson2025rtilience`, `meliani2025proactive`)
+  should be re-checked against the publisher before submission.
+
 ## Open decisions
 - Confirm SP&E reference style: AMA (numeric) chosen as default; capital- and lowercase `.bst`
   copies are present. Switch the `\documentclass` option if SP&E requires Vancouver/Harvard/etc.

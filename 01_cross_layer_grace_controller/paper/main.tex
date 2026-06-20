@@ -198,6 +198,93 @@ actual state rather than fixed in advance.
   state is lost until the cluster re-converges. The scenario is illustrative.}\label{fig:problem}
 \end{figure}
 
+\subsection{Why current approaches fall short}\label{sec:bg-existing}
+Return to the scenario of Section~\ref{sec:bg-gap} (Figure~\ref{fig:problem}), where a
+$\sim$45\,s handoff is severed by a 30\,s grace. A team facing this can reach for several well-known
+options, but none closes the gap: each acts on only \emph{one side} of the orchestrator/runtime
+boundary, whereas the gap is precisely a \emph{cross-layer} mismatch.
+
+\paragraph{Enlarging the grace period.} The reflex is to raise
+\texttt{terminationGracePeriodSeconds}~\cite{k8sgraceful} to a generous worst case. This merely
+trades one cost for another: because a rolling update advances no faster than the grace each pod
+actually consumes, an over-long grace inflates every deployment and ties up capacity. It is also
+still a fixed guess---a load spike that pushes handoff beyond the assumed worst case truncates state
+anyway (the 45\,s of Figure~\ref{fig:problem} could just as easily be 90\,s)---and it cannot shrink
+when load is light, so the common case keeps paying for the rare one.
+
+\paragraph{A fixed \texttt{preStop} sleep.} Sleeping for a constant interval in the
+\texttt{preStop} hook~\cite{k8sgraceful} is the same blind guess in different clothing: it neither
+observes how much handoff remains nor guarantees it finishes. Too long wastes the window; too short
+still lets \texttt{SIGKILL} cut in.
+
+\paragraph{Readiness and liveness probes.} Probes~\cite{k8sgraceful} gate traffic and trigger
+restarts from a per-pod health signal. They are orthogonal to termination: they cannot lengthen,
+shorten, or otherwise coordinate the kill deadline, so they say nothing about whether a departing pod
+has finished the handoff of Figure~\ref{fig:problem}.
+
+\paragraph{PodDisruptionBudgets.} A PDB~\cite{k8sPDB} limits how many pods may be voluntarily
+disrupted at once. That is an availability \emph{count} constraint, not a per-pod completion check:
+it does not know whether a given pod has drained its state, and it never extends that pod's
+grace---so a pod can still be \texttt{SIGKILL}ed mid-handoff while the budget is satisfied.
+
+\paragraph{Application-level graceful shutdown alone.} The application can trap \texttt{SIGTERM},
+stop accepting work, and hand off correctly---yet it is racing a fixed external deadline it has no
+way to influence. When handoff legitimately needs longer than the configured grace (as in
+Figure~\ref{fig:problem}), doing everything right internally does not help: the orchestrator kills it
+regardless.
+
+\paragraph{Runtime-native coordinated shutdown.} Actor runtimes offer phased shutdown---Akka's
+\emph{CoordinatedShutdown}~\cite{akkacoordinated} and Orleans' graceful deactivation~\cite{orleans}
+(Section~\ref{sec:related}). These run ordered phases with \emph{configured} per-phase timeouts that
+live inside the runtime and are never communicated to the orchestrator's grace period. The phases are
+better-structured guesses, but they are still guesses, and the cross-layer deadline stays uninformed.
+
+\paragraph{Speeding up or sharding the handoff.} Reducing $|H_p|$ or raising the handoff rate $\rho$
+shrinks the time needed and certainly helps, but it is a mitigation, not a fix: the required time
+still varies with load, and the deadline is still set without reference to it.
+
+\paragraph{Cross-layer coordination exists---but for other concerns.} A body of work \emph{does} cross
+the boundary, which makes the specific omission sharper. Signal-based health monitoring derives a
+pod's Kubernetes health from runtime state instead of polling it~\cite{roberts2025}, and actor
+frameworks expose comparable runtime health to the orchestrator~\cite{akkaHealth}---but this
+coordinates the \emph{health probe}, not the termination deadline. Leases and split-brain resolvers
+coordinate cluster \emph{membership and quorum} across the two layers~\cite{akkaLease,akkaSBR};
+autonomic and operator-driven controllers manage \emph{placement and lifecycle}~\cite{kephart2003,
+meliani2025proactive}; rollback-recovery and checkpointing \emph{preserve state} for restoration
+elsewhere~\cite{elnozahy2002}; and deployment-time optimisation plans placement under fault-tolerance
+and latency constraints~\cite{ucc23,gustafsson2025rtilience}. Each is genuinely cross-layer, yet none
+couples the termination grace period to the runtime's handoff and convergence progress---so in
+Figure~\ref{fig:problem} the pod is still killed at 30\,s with its handoff unfinished.
+
+\medskip\noindent
+What unites these is one structural fact: the \emph{information} needed to choose a correct
+deadline---the runtime's handoff backlog, achievable rate, and convergence state---lives in the
+runtime, while the \emph{control} that enforces the deadline---the grace period and the rollout
+pace---lives in the orchestrator, and nothing carries the former to the latter. Every option above
+either freezes a constant ahead of time or operates within
+a single layer; none establishes a feedback path across the boundary. Building that path is exactly
+what our controller does (Section~\ref{sec:design}).
+
+\begin{table}[t]
+\centering
+\caption{Standard responses to the grace gap and why each fails to close it: every one acts within a
+single layer, so none derives the deadline from runtime state.}\label{tab:existing}
+\begin{tabular}{@{}p{0.30\linewidth}p{0.15\linewidth}p{0.47\linewidth}@{}}
+\toprule
+\textbf{Approach} & \textbf{Acts on} & \textbf{Why it cannot close the grace gap} \\
+\midrule
+Large static grace (over-provision)~\cite{k8sgraceful} & orchestrator & fixed guess; inflates every rollout; still truncates under heavier-than-assumed load \\
+Fixed \texttt{preStop} sleep~\cite{k8sgraceful} & runtime hook & blind constant; ignores actual handoff progress \\
+Readiness / liveness probes~\cite{k8sgraceful} & orchestrator & gate traffic/restart per pod; do not set or extend the kill deadline \\
+PodDisruptionBudget~\cite{k8sPDB} & orchestrator & limits disrupted pod \emph{count}, not handoff completion; never extends grace \\
+App-level graceful shutdown alone & runtime & races a fixed external deadline it cannot influence \\
+Runtime-native coordinated shutdown~\cite{akkacoordinated,orleans} & runtime & configured internal timeouts; not fed to the orchestrator grace \\
+Signal-based health / lease / autonomic lifecycle~\cite{roberts2025,akkaLease,kephart2003} & both layers & genuinely cross-layer, but coordinate health/quorum/placement---not the grace deadline \\
+Faster / sharded handoff~\cite{elnozahy2002} & runtime & mitigation only; required time still varies, deadline still blind \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 %====================================================================
 \section{System Model and Problem Definition}\label{sec:model}
 

@@ -37,9 +37,11 @@ Extracted from `Wiley_New_Journal_Design_version_5__NJD_v5_.zip`:
    resolves the style on any case-sensitive setup. **Keep both cases.**
 
 ### Build status
-Verified: `xelatex → bibtex → xelatex → xelatex` exits 0, 0 undefined citations, `main.pdf`
-builds. The body is still a section skeleton (guidance comments) plus two real tables
-(`tab:roles`, `tab:actor-compare`); prose and `\cite`s are added as the work progresses.
+Verified: `xelatex → bibtex → xelatex → xelatex` exits 0, 0 undefined citations/refs, `main.pdf`
+builds (~9 pages). Prose is written through the Design section (Abstract, Introduction, Background
+incl. the problem figure and a "why current approaches fall short" subsection, System Model, and the
+full Design); Evaluation, Discussion, the prose body of Related Work, and Conclusion are still
+skeleton (guidance comments). See the top-level `README.md` for the done/not-done snapshot.
 
 > **Always build with XeLaTeX, never pdfLaTeX** (the v5 class needs XeLaTeX fonts).
 

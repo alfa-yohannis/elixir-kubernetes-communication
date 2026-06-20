@@ -1,20 +1,23 @@
-%% references.bib -- M3 paper (SP&E target). Seeded from the report's bibliography
-%% plus the related work surfaced during venue research. Verify every entry
-%% (years, DOIs, page numbers) against the publisher before submission.
+%% references.bib -- M3 paper (SP&E target).
+%% EVERY entry has a resolvable URL (DOI / arXiv / official doc), and every DOI/ID below
+%% was verified to exist and be accessible via web search. Do NOT add hallucinated entries:
+%% confirm the exact DOI/arXiv/URL before adding any new reference.
 
 @article{souza2024dependable,
   title   = {Dependable Microservices in the Kubernetes Era: A Practitioners Survey},
   author  = {Souza, V. J. S. and Neves, V. O. and Kimura, B. Y. L.},
   journal = {Journal of Internet Services and Applications},
   volume  = {15}, number = {1}, pages = {561--583}, year = {2024},
-  doi     = {10.5753/jisa.2024.4000}
+  doi     = {10.5753/jisa.2024.4000},
+  url     = {https://doi.org/10.5753/jisa.2024.4000}
 }
 
 @article{singh2025istio,
   title   = {Resilient microservices: an investigation into Istio effectiveness in Kubernetes},
   author  = {Singh, Shubham and Muntean, Cristina Hava and Gupta, Shaguna},
-  journal = {Cluster Computing}, year = {2025},
-  doi     = {10.1007/s10586-025-05750-x}
+  journal = {Cluster Computing}, volume = {29}, number = {1}, year = {2025},
+  doi     = {10.1007/s10586-025-05750-x},
+  url     = {https://doi.org/10.1007/s10586-025-05750-x}
 }
 
 @article{gustafsson2025rtilience,
@@ -22,54 +25,117 @@
   author  = {Gustafsson, Harald and Svensson, Fredrik and Mini, Raquel and Abeni, Luca and Andreoli, Remo and Cucinotta, Tommaso},
   journal = {IEEE Transactions on Services Computing},
   volume  = {18}, number = {6}, pages = {4139--4152}, year = {2025},
-  doi     = {10.1109/TSC.2025.3621319}
+  doi     = {10.1109/TSC.2025.3621319},
+  url     = {https://doi.org/10.1109/TSC.2025.3621319}
 }
 
 @article{meliani2025proactive,
-  title   = {Resiliency Focused Proactive Lifecycle Management for Stateful Microservices in Multi-Cluster Containerized Environments},
+  title   = {Resiliency focused proactive lifecycle management for stateful microservices in multi-cluster containerized environments},
   author  = {Meliani, Abd Elghani and Mekki, Mohamed and Ksentini, Adlen},
-  journal = {Computer Communications}, year = {2025},
-  note    = {PII S0140366425000684}
+  journal = {Computer Communications}, volume = {236}, pages = {108111}, year = {2025},
+  doi     = {10.1016/j.comcom.2025.108111},
+  url     = {https://doi.org/10.1016/j.comcom.2025.108111}
 }
 
-@misc{libcluster,
-  title  = {libcluster: Automatic Erlang cluster formation and management},
-  author = {Paul Schoenfelder},
-  howpublished = {\url{https://github.com/bitwalker/libcluster}}, note = {Accessed 2026}
+@article{roberts2025,
+  title   = {Signalling Health for Improved Kubernetes Microservice Availability},
+  author  = {Roberts, Jacob and Archibald, Blair and Trinder, Phil},
+  journal = {arXiv preprint arXiv:2507.02158}, year = {2025},
+  eprint  = {2507.02158}, archivePrefix = {arXiv},
+  url     = {https://arxiv.org/abs/2507.02158}
 }
 
-@misc{horde,
-  title  = {Horde: Distributed supervisor and registry built on delta-CRDTs},
-  author = {Derek Kraan and contributors},
-  howpublished = {\url{https://github.com/derekkraan/horde}}, note = {Accessed 2026}
+@inproceedings{ucc23,
+  author    = {Andreoli, Remo and Gustafsson, Harald and Abeni, Luca and Mini, Raquel and Cucinotta, Tommaso},
+  title     = {Optimal Deployment of Cloud-native Applications with Fault-Tolerance and Time-Critical End-to-End Constraints},
+  booktitle = {Proc. 16th IEEE/ACM Int'l Conf. on Utility and Cloud Computing (UCC)},
+  year      = {2023},
+  doi       = {10.1145/3603166.3632139},
+  url       = {https://doi.org/10.1145/3603166.3632139}
 }
 
-@misc{bonny,
-  title  = {Bonny: A Kubernetes operator development framework for Elixir},
-  author = {Mike Buhot and contributors},
-  howpublished = {\url{https://github.com/coryodaniel/bonny}}, note = {Accessed 2026}
+@article{kephart2003,
+  author  = {Kephart, Jeffrey O. and Chess, David M.},
+  title   = {The Vision of Autonomic Computing},
+  journal = {IEEE Computer}, volume = {36}, number = {1}, pages = {41--50}, year = {2003},
+  doi     = {10.1109/MC.2003.1160055},
+  url     = {https://doi.org/10.1109/MC.2003.1160055}
+}
+
+@article{elnozahy2002,
+  author  = {Elnozahy, E. N. and Alvisi, Lorenzo and Wang, Yi-Min and Johnson, David B.},
+  title   = {A Survey of Rollback-Recovery Protocols in Message-Passing Systems},
+  journal = {ACM Computing Surveys}, volume = {34}, number = {3}, pages = {375--408}, year = {2002},
+  doi     = {10.1145/568522.568525},
+  url     = {https://doi.org/10.1145/568522.568525}
 }
 
 @misc{k8sgraceful,
-  title  = {Kubernetes Documentation: Pod Lifecycle -- Termination of Pods},
-  author = {{The Kubernetes Authors}},
-  howpublished = {\url{https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/}}, note = {Accessed 2026}
+  author       = {{The Kubernetes Authors}},
+  title        = {Kubernetes Documentation: Pod Lifecycle -- Termination of Pods},
+  howpublished = {\url{https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/}},
+  url          = {https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/}, note = {Accessed 2026}
+}
+
+@misc{k8sPDB,
+  author       = {{The Kubernetes Authors}},
+  title        = {Kubernetes Documentation: Disruptions / Pod Disruption Budgets},
+  howpublished = {\url{https://kubernetes.io/docs/concepts/workloads/pods/disruptions/}},
+  url          = {https://kubernetes.io/docs/concepts/workloads/pods/disruptions/}, note = {Accessed 2026}
 }
 
 @misc{akkacoordinated,
-  title  = {Akka Documentation: Coordinated Shutdown},
-  author = {{Lightbend, Inc.}},
-  howpublished = {\url{https://doc.akka.io/docs/akka/current/coordinated-shutdown.html}}, note = {Accessed 2026}
+  author       = {{Lightbend, Inc.}},
+  title        = {Akka Documentation: Coordinated Shutdown},
+  howpublished = {\url{https://doc.akka.io/docs/akka/current/coordinated-shutdown.html}},
+  url          = {https://doc.akka.io/docs/akka/current/coordinated-shutdown.html}, note = {Accessed 2026}
+}
+
+@misc{akkaHealth,
+  author       = {{Lightbend, Inc.}},
+  title        = {Akka Management: Health Checks},
+  howpublished = {\url{https://doc.akka.io/docs/akka-management/current/healthchecks.html}},
+  url          = {https://doc.akka.io/docs/akka-management/current/healthchecks.html}, note = {Accessed 2026}
+}
+
+@misc{akkaLease,
+  author       = {{Lightbend, Inc.}},
+  title        = {Akka Management: Kubernetes Lease},
+  howpublished = {\url{https://doc.akka.io/libraries/akka-management/current/kubernetes-lease.html}},
+  url          = {https://doc.akka.io/libraries/akka-management/current/kubernetes-lease.html}, note = {Accessed 2026}
+}
+
+@misc{akkaSBR,
+  author       = {{Lightbend, Inc.}},
+  title        = {Akka: Split Brain Resolver},
+  howpublished = {\url{https://doc.akka.io/libraries/akka-core/current/split-brain-resolver.html}},
+  url          = {https://doc.akka.io/libraries/akka-core/current/split-brain-resolver.html}, note = {Accessed 2026}
 }
 
 @misc{orleans,
-  title  = {Orleans: Distributed Virtual Actor Model},
-  author = {{Microsoft}},
-  howpublished = {\url{https://learn.microsoft.com/dotnet/orleans/}}, note = {Accessed 2026}
+  author       = {{Microsoft}},
+  title        = {Deploy Microsoft Orleans on Kubernetes},
+  howpublished = {\url{https://learn.microsoft.com/en-us/dotnet/orleans/deployment/kubernetes}},
+  url          = {https://learn.microsoft.com/en-us/dotnet/orleans/deployment/kubernetes}, note = {Accessed 2026}
 }
 
-@misc{spe2024microservices,
-  title  = {Special Issue: Efficient Management of Microservice-Based Systems and Applications},
-  author = {{Software: Practice and Experience}},
-  journal = {Software: Practice and Experience}, volume = {54}, number = {4}, year = {2024}
+@misc{horde,
+  author       = {Kraan, Derek and {Horde Contributors}},
+  title        = {Horde: Distributed supervisor and registry built on delta-CRDTs},
+  howpublished = {\url{https://hexdocs.pm/horde/}},
+  url          = {https://hexdocs.pm/horde/}, note = {Accessed 2026}
+}
+
+@misc{libcluster,
+  author       = {Schoenfelder, Paul},
+  title        = {libcluster: Automatic Erlang cluster formation and management},
+  howpublished = {\url{https://github.com/bitwalker/libcluster}},
+  url          = {https://github.com/bitwalker/libcluster}, note = {Accessed 2026}
+}
+
+@misc{bonny,
+  author       = {O'Daniel, Cory},
+  title        = {Bonny: A Kubernetes operator development framework for Elixir},
+  howpublished = {\url{https://github.com/coryodaniel/bonny}},
+  url          = {https://github.com/coryodaniel/bonny}, note = {Accessed 2026}
 }

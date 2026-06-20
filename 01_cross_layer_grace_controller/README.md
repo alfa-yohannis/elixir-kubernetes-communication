@@ -22,13 +22,15 @@ considered but **dropped — journal closed**.)
   cover_letter/ declarations/ upload/ zenodo/` + `OUTLINE.md`, `CONTEXT.md`.
 - **Wiley NJD v5 template installed** in `paper/` (`WileyNJDv5.cls`, all `wileyNJD-*.bst` +
   capital-`W` copies, `lettersp.sty`, `NJD*.sty`, `mla.sty`, assets). **Compiles clean with XeLaTeX**
-  (`latexmk -xelatex main.tex`), currently **7 pages, 0 errors, 0 undefined**.
+  (`latexmk -xelatex main.tex`), currently **9 pages, 0 errors, 0 undefined**.
 - **`paper/main.tex` prose written through the Design section:**
   - **Abstract** — conceptual, deliberately free of product/API names; quantitative results left as
     an explicit placeholder (no fabricated numbers).
   - **§1 Introduction** — full prose + 4 enumerated contributions.
   - **§2 Background & Motivation** — 3 subsections + **the problem figure** (`fig:problem`, the
-    "grace gap": 30 s grace vs ~45 s handoff → ~150 procs killed). Marked illustrative.
+    "grace gap": 30 s grace vs ~45 s handoff → ~150 procs killed, illustrative) + a
+    **"Why current approaches fall short"** subsection explaining, per approach, why existing fixes
+    can't close the gap (root-cause figure `fig:gap` + summary table `tab:existing`).
   - **§3 System Model & Problem Definition** — grace-safety invariant (`eq:invariant`) and the
     optimal grace `eq:objective`; why static/over-provisioned both fail.
   - **§4 Design** — overview + **Role→Component table** (`tab:roles`) + **sequence figure**
@@ -63,15 +65,13 @@ considered but **dropped — journal closed**.)
 All figure sources live in `figures/`; PDFs are embedded by `paper/main.tex`
 (`\graphicspath` includes `figures/`). Titles are clean English with **no internal labels**
 ("Problem 4"/"M3") and **no scenario product names** — keep it that way.
-
-| PDF (in paper)                         | Source                                  | Tool | Notes |
-|----------------------------------------|-----------------------------------------|------|-------|
 All three diagrams use the **standard PlantUML/UML theme** (default colours and shapes — no custom
-skinparam palette, no coloured notes). Keep it that way.
+skinparam palette, no coloured notes).
 
 | PDF (in paper)                         | Source                                  | Tool | Notes |
 |----------------------------------------|-----------------------------------------|------|-------|
 | `grace-gap-problem.pdf` (`fig:problem`)| `grace-gap-problem.puml`                | PlantUML | the addressed problem; full-width float |
+| `cross-layer-gap.pdf` (`fig:gap`)      | `cross-layer-gap.puml`                  | PlantUML | why existing approaches fail (info vs control split); centered float |
 | `grace-convergence-sequence.pdf` (`fig:seq`) | `grace-convergence-sequence.puml`  | PlantUML | full-width float (font must stay readable) |
 | `grace-convergence-activity.pdf` (`fig:act`) | `grace-convergence-activity.puml`  | PlantUML | genuine **activity diagram** (`start`/`stop`/`repeat`); vertical/tall — **normal centered float** at `width=0.40\linewidth` |
 

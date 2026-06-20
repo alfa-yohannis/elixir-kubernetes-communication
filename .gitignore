@@ -376,3 +376,5 @@ diagrams/problems/*.pdf
 diagrams/problems/*.svg
 diagrams/mechanisms/*.png
 report/report.pdf
+01_cross_layer_grace_controller/paper/main.pdf
+

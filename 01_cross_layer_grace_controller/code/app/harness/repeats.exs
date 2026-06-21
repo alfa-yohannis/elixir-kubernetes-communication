@@ -1,8 +1,8 @@
-# Statistical-rigor runner: repeats the headline scenarios so we can report mean +/- 95% CI.
-# Streams each result as it completes (partial data survives an interrupt). Launch with:
+# Penjalan rigor-statistik: mengulang skenario utama agar bisa melaporkan rata-rata +/- CI 95%.
+# Men-stream tiap hasil begitu selesai (data parsial selamat bila terinterupsi). Luncurkan dengan:
 #   MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/repeats.exs
-# Writes data/results_runs_ci.csv (table loads, N=10) and data/results_rollout_ci.csv (rollout, N=5).
-# NEVER pkill -f '...@127.0.0.1' around this (it kills the running shell); kill orphan beams by PID.
+# Menulis data/results_runs_ci.csv (beban tabel, N=10) dan data/results_rollout_ci.csv (rollout, N=5).
+# JANGAN PERNAH pkill -f '...@127.0.0.1' di sekitar ini (mematikan shell yang berjalan); matikan beam yatim by PID.
 
 Node.set_cookie(:ck)
 

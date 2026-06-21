@@ -1,6 +1,6 @@
-# Manual 2-node probe for M-b (run, do not include in `mix test`):
+# Probe 2-node manual untuk M-b (dijalankan manual, jangan disertakan di `mix test`):
 #   MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run scripts/cluster_probe.exs
-# primary = the leaving node; the spawned peer = the survivor.
+# primary = node yang pergi; peer yang di-spawn = survivor-nya.
 defmodule ClusterProbe do
   def run do
     Node.set_cookie(:ck)

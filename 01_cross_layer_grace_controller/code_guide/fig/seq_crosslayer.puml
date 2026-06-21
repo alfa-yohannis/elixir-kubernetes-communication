@@ -1,0 +1,30 @@
+@startuml
+' Sequence diagram: interaksi LINTAS-LAPIS Elixir <-> Kubernetes (komponen).
+' Bagian atas = loop reconcile operator; bagian bawah = terminasi pod saat rolling update.
+' Tema PlantUML/UML standar. Render: plantuml -tpdf seq_crosslayer.puml
+title Interaksi lintas-lapis Elixir <-> Kubernetes
+
+actor "kubelet" as K
+participant "Operator\n(Elixir + kubectl)" as Op
+participant "API server /\nDeployment" as API
+participant "Pod aplikasi\n(ProbeHTTP, Shutdown,\nHandoff)" as Pod
+participant "Pod survivor" as Surv
+
+== Loop reconcile operator (tiap 5 detik) ==
+Op -> API : kubectl get pods
+API --> Op : daftar IP pod
+Op -> Pod : HTTP GET /probe
+Pod --> Op : {backlog, rate, T_c}
+Op -> Op : Grace.compute(...)
+Op -> API : kubectl patch\nterminationGracePeriodSeconds = g
+
+== Terminasi pod (rolling update) ==
+K -> Pod : SIGTERM
+Pod -> Pod : preStop -> POST /drain\n(Shutdown.drain)
+Pod -> Surv : handoff state (Horde)
+alt handoff selesai sebelum grace
+  Pod --> K : keluar bersih (tanpa kehilangan state)
+else grace habis lebih dulu
+  K -> Pod : SIGKILL (state sisa hilang)
+end
+@enduml

@@ -34,7 +34,6 @@
 \usepackage{algpseudocode}
 \usepackage{booktabs}
 \usepackage{subcaption}
-\usepackage{wrapfig}  % reinstated for the (tall) activity diagram as a text-wrapped figure
 % amsthm is loaded by the WileyNJDv5 class. The class already provides a \proposition command, so we
 % define a uniquely-named environment for our one lightweight safety proposition (Design section).
 \newtheorem{gcprop}{Proposition}
@@ -397,14 +396,15 @@ single termination and Figure~\ref{fig:act} the control loop.
 
 \subsection{Convergence probe}\label{sec:design-probe}
 
-\setlength{\columnsep}{16pt}% gap between the wrapped figure (image AND caption) and body text
-\begin{wrapfigure}{r}{0.34\linewidth}
+
+\begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{grace-convergence-activity.pdf}
   \caption{The control loop: measure runtime state, size the grace period and the rollout pace, then
   drain and hand off, repeating while handoff is still pending, until a clean shutdown.}\label{fig:act}
-\end{wrapfigure}
-\setlength{\columnsep}{10pt}%
+\end{figure}
+
+
 Each pod exposes a lightweight endpoint reporting (i) its current handoff backlog $B_p$ (the number of
 stateful processes it would need to hand off), (ii) a smoothed estimate of the achievable handoff rate
 $\rho_p$, and (iii) the membership layer's convergence state and a recent estimate of $T_c$. The rate

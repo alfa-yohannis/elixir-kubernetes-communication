@@ -1,49 +1,49 @@
 # grace_convergence (app)
 
-Reference implementation of the grace-convergence controller described in the paper. See
-`../DESIGN.md` for analysis, requirements, design, and the validation plan.
+Implementasi acuan (reference implementation) dari controller grace-convergence yang dijelaskan di paper. Lihat
+`../DESIGN.md` untuk analisis, kebutuhan, desain, dan rencana validasi.
 
-## Modules
-- `GraceConvergence.Grace` — the grace-period policy `g = clamp(T_d + B/ρ + T_c + σ, g_min, g_max)`.
-- `GraceConvergence.Probe` — convergence probe: backlog, EWMA handoff rate, `T_c` estimate.
-- `GraceConvergence.StatefulWorker` / `GraceConvergence.Workers` — Horde-distributed stateful processes.
-- `GraceConvergence.Handoff` — drains local workers by transferring state to surviving nodes (throttled).
-- `GraceConvergence.Shutdown` — adaptive termination hook; picks the grace per the configured policy.
-- `GraceConvergence.ProbeHTTP` — `/probe` (reading), `/healthz`, and `POST /drain` (preStop hook).
-- `GraceConvergence.Operator` — Kubernetes coordinator: reconcile loop (`kubectl` get pods → `/probe`
-  → `Grace.compute` → `kubectl patch` TGPS). Runs only in the operator role (`GRACE_ROLE=operator`).
-- `GraceConvergence.Harness` — experiment driver: `run/2`, `run_sweep/3`, `rollout/4`, `overhead/1`,
+## Modul
+- `GraceConvergence.Grace` — kebijakan (policy) grace-period `g = clamp(T_d + B/ρ + T_c + σ, g_min, g_max)`.
+- `GraceConvergence.Probe` — probe konvergensi: backlog, rate handoff EWMA, estimasi `T_c`.
+- `GraceConvergence.StatefulWorker` / `GraceConvergence.Workers` — proses stateful terdistribusi-Horde.
+- `GraceConvergence.Handoff` — menguras (drain) worker lokal dengan memindahkan state ke node yang bertahan (di-throttle).
+- `GraceConvergence.Shutdown` — hook terminasi adaptif; memilih grace sesuai policy yang dikonfigurasi.
+- `GraceConvergence.ProbeHTTP` — `/probe` (pembacaan), `/healthz`, dan `POST /drain` (hook preStop).
+- `GraceConvergence.Operator` — koordinator Kubernetes: loop rekonsiliasi (`kubectl` get pods → `/probe`
+  → `Grace.compute` → `kubectl patch` TGPS). Hanya berjalan pada peran operator (`GRACE_ROLE=operator`).
+- `GraceConvergence.Harness` — penggerak (driver) eksperimen: `run/2`, `run_sweep/3`, `rollout/4`, `overhead/1`,
   `scale/1`.
-- `GraceConvergence.Presence` — `Phoenix.Tracker` presence (the CRDT engine behind Phoenix.Presence),
-  a realistic distributed workload used to measure real convergence time `T_c` (RQ8).
+- `GraceConvergence.Presence` — presence `Phoenix.Tracker` (mesin CRDT di balik Phoenix.Presence),
+  sebuah beban kerja (workload) terdistribusi yang realistis untuk mengukur waktu konvergensi nyata `T_c` (RQ8).
 
-## Running the tests & experiments
+## Menjalankan tes & eksperimen
 
-### 1. Unit tests (fast, no cluster) — validates the grace policy
+### 1. Unit test (cepat, tanpa cluster) — memvalidasi policy grace
 ```bash
 mix deps.get
 mix compile
 mix test                 # 6 Grace-policy tests; the :cluster suite is excluded by default
 ```
 
-### 2. Multi-node integration test (V1) — a real 2-node BEAM cluster
-The primary must be a distributed node, so launch it explicitly (it spawns a peer "survivor"
-internally via `:peer`):
+### 2. Integration test multi-node (V1) — cluster BEAM 2-node nyata
+Node primary harus berupa node terdistribusi, jadi luncurkan secara eksplisit (ia akan membuat (spawn) peer "survivor"
+secara internal melalui `:peer`):
 ```bash
 MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix test --only cluster
 ```
-Asserts (a) a graceful drain hands off **all** local workers to the survivor with **state
-preserved**, and (b) a too-short grace **truncates** the handoff (`{:timeout, remaining>0}` — the
-RQ1 loss case). `epmd` is started automatically by the BEAM.
+Memastikan bahwa (a) drain yang graceful melakukan handoff **semua** worker lokal ke survivor dengan **state
+terjaga**, dan (b) grace yang terlalu pendek **memotong (truncate)** handoff (`{:timeout, remaining>0}` — kasus
+kehilangan pada RQ1). `epmd` dijalankan otomatis oleh BEAM.
 
-### 3. Manual 2-node probe (watch a handoff live)
+### 3. Probe 2-node manual (mengamati handoff secara langsung)
 ```bash
 MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run scripts/cluster_probe.exs
 ```
-Prints BEFORE/AFTER worker placement and the drain result, e.g.
+Mencetak penempatan worker BEFORE/AFTER dan hasil drain, mis.
 `BEFORE local_primary=20 local_peer=20 … drain result=:ok … AFTER local_primary=0 local_peer=40`.
 
-### 4. Single-node REPL (poke the API)
+### 4. REPL single-node (menyentuh API)
 ```bash
 iex -S mix
 iex> GraceConvergence.start_many(500)    # create 500 stateful workers
@@ -51,9 +51,9 @@ iex> GraceConvergence.reading()          # probe reading (backlog, rate, T_c)
 iex> GraceConvergence.drain_and_await()  # run the adaptive drain
 ```
 
-### 5. Full experiment suite (real data → `../../data/`, figures via `analysis/plot.py`)
-All driven with a distributed primary (spawns a survivor peer); **never `pkill -f '…@127.0.0.1'`** —
-that pattern matches the running shell and kills it (exit 144). Kill orphan beams by PID.
+### 5. Suite eksperimen lengkap (data nyata → `../../data/`, figur melalui `analysis/plot.py`)
+Semua dijalankan dengan primary terdistribusi (membuat peer survivor); **jangan pernah `pkill -f '…@127.0.0.1'`** —
+pola itu cocok dengan shell yang sedang berjalan dan mematikannya (exit 144). Matikan beam yatim (orphan) berdasarkan PID.
 ```bash
 P="MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run"
 $P harness/run.exs        # two-load table (RQ1/RQ2)        -> results_runs.csv
@@ -63,15 +63,15 @@ $P harness/scale.exs      # |H| 1k->40k scalability (RQ6)    -> results_scale.cs
 $P harness/presence.exs   # Phoenix.Presence convergence (RQ8) -> results_presence.csv
 ~/venv/bin/python ../analysis/plot.py   # render all figures
 ```
-Kubernetes experiments (RQ7 + fail-safe) live in `../k8s/`: `bash ../k8s/netem.sh` (real latency) and
-`bash ../k8s/faults.sh` (operator crash / probe fallback / revoked RBAC). See `../k8s/README.md`.
+Eksperimen Kubernetes (RQ7 + fail-safe) berada di `../k8s/`: `bash ../k8s/netem.sh` (latensi nyata) dan
+`bash ../k8s/faults.sh` (operator crash / fallback probe / RBAC dicabut). Lihat `../k8s/README.md`.
 
-**Status: unit 6/6 pass; cluster integration 2/2 pass; full suite + K8s (RQ1–RQ7) run on real data.**
+**Status: unit 6/6 lulus; integrasi cluster 2/2 lulus; suite lengkap + K8s (RQ1–RQ7) dijalankan pada data nyata.**
 
-## Termination policy (config `:grace_policy`, FR6)
-`:m3` (adaptive, default) · `:prestop_sleep` (fixed `:static_grace`) · `:static30` · `:static300`.
-Switch per run, e.g. `config :grace_convergence, grace_policy: :static30`. The harness (M-c) will
-sweep all four to produce the comparison in `../data/` → `../figures/`.
+## Policy terminasi (config `:grace_policy`, FR6)
+`:m3` (adaptif, default) · `:prestop_sleep` (fixed `:static_grace`) · `:static30` · `:static300`.
+Ganti per run, mis. `config :grace_convergence, grace_policy: :static30`. Harness (M-c) akan
+menyapu (sweep) keempatnya untuk menghasilkan perbandingan di `../data/` → `../figures/`.
 
-> Kubernetes deployment (operator + manifests) is M-d; `config/prod.exs` already selects the
-> libcluster Kubernetes strategy.
+> Deployment Kubernetes (operator + manifest) adalah M-d; `config/prod.exs` sudah memilih
+> strategi libcluster Kubernetes.

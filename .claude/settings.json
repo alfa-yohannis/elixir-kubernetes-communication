@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dot -V)",
+      "Bash(dot -Tpng -Gdpi=120 grace-convergence-activity.dot -o /tmp/flow.png)",
+      "Bash(neato -n2 -Tpdf grace-convergence-activity.dot -o grace-convergence-activity.pdf)",
+      "Bash(neato -n2 -Tpng -Gdpi=110 grace-convergence-activity.dot -o /tmp/snake.png)",
+      "Bash(echo \"pdf OK \\($\\(pdfinfo grace-convergence-activity.pdf)",
+      "Bash(neato -n2 -Tpng -Gdpi=120 grace-convergence-activity.dot -o /tmp/snake3.png)",
+      "Bash(neato -n2 -Tpng -Gdpi=120 grace-convergence-activity.dot -o /tmp/snake4.png)",
+      "Bash(neato -n2 -Tpng -Gdpi=120 grace-convergence-activity.dot -o /tmp/snake6.png)",
+      "Bash(neato -n2 -Tpng -Gdpi=120 grace-convergence-activity.dot -o /tmp/snake7.png)",
+      "Bash(ls lib/ lib/grace_convergence/)",
+      "Bash(wc -l lib/*.ex lib/grace_convergence/*.ex)",
+      "Bash(awk '/Glosarium/{f=1} f' main.tex)"
+    ]
+  }
+}

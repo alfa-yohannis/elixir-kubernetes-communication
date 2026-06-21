@@ -1,6 +1,6 @@
-# V2 experiment runner. Launch with a distributed primary (it spawns a survivor peer):
+# Penjalan eksperimen utama. Luncurkan dengan primary terdistribusi (ia membuat/spawn peer survivor):
 #   MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/run.exs
-# Writes real measurements to ../../data/results_runs.csv and prints a summary.
+# Menulis pengukuran nyata ke ../../data/results_runs.csv dan mencetak ringkasan.
 
 Node.set_cookie(:ck)
 

@@ -1,9 +1,9 @@
-# Realistic-workload case study: Phoenix.Tracker (the CRDT engine behind Phoenix.Presence)
-# re-convergence on a node departure. Measures the REAL membership-convergence time T_c (the
-# invariant's convergence term) as a function of the tracked-presence count N, on an unmodified
-# Phoenix distributed feature. Launch with a distributed primary (spawns a survivor peer):
+# Studi kasus beban kerja realistis: re-konvergensi Phoenix.Tracker (mesin CRDT di balik
+# Phoenix.Presence) saat sebuah node pergi. Mengukur waktu konvergensi-keanggotaan NYATA T_c (suku
+# konvergensi pada invariant) sebagai fungsi jumlah presence N yang dilacak, pada fitur terdistribusi
+# Phoenix yang tidak dimodifikasi. Luncurkan dengan primary terdistribusi (membuat/spawn peer survivor):
 #   MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/presence.exs
-# Writes data/results_presence.csv. (Never pkill -f '...@127.0.0.1' here -- it kills this shell.)
+# Menulis data/results_presence.csv. (Jangan pernah pkill -f '...@127.0.0.1' di sini -- mematikan shell ini.)
 
 Node.set_cookie(:ck)
 

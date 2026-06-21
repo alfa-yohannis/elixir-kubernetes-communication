@@ -1,10 +1,10 @@
-# code/ — artifact & experiment harness
+# code/ — artefak & harness eksperimen
 
-Reference implementation of the grace-convergence controller plus the harness that produces
-`../data/` and `../figures/`. See `DESIGN.md` for analysis → requirements → design → validation, and
-`app/README.md` / `k8s/README.md` for how to run everything.
+Implementasi acuan (reference implementation) dari controller grace-convergence beserta harness yang menghasilkan
+`../data/` dan `../figures/`. Lihat `DESIGN.md` untuk analisis → kebutuhan → desain → validasi, serta
+`app/README.md` / `k8s/README.md` untuk cara menjalankan semuanya.
 
-## Layout (as built)
+## Tata letak (sesuai yang dibangun)
 ```
 code/
 ├── app/                        # Elixir/OTP mix project `grace_convergence`
@@ -18,25 +18,25 @@ code/
 └── Dockerfile                  # one multi-stage image; GRACE_ROLE switches app vs operator
 ```
 
-## Experiment scenarios (baselines)
-- (a) static 30 s, (b) over-provisioned 300 s, (c) preStop fixed sleep, (d) **adaptive controller** —
-  swept over handoff backlog `|H|` and rate `ρ`.
+## Skenario eksperimen (baseline)
+- (a) static 30 s, (b) over-provisioned 300 s, (c) preStop fixed sleep, (d) **controller adaptif** —
+  disapu (swept) terhadap handoff backlog `|H|` dan rate `ρ`.
 
 ## Status
-- **Local BEAM:** unit 6/6 + 2-node cluster integration 2/2 pass; full suite (RQ1–RQ6) → real
-  `../data/*.csv`.
-- **Kubernetes (kind):** app + operator deployed; the operator patches
-  `terminationGracePeriodSeconds` from runtime backlog; RQ7 (real `tc netem` latency) and the
-  fail-safe injection run on the cluster.
-- The coordinator is a **`kubectl`-based GenServer operator** (`lib/grace_convergence/operator.ex`),
-  **not** Bonny.
+- **BEAM lokal:** unit 6/6 + integrasi cluster 2-node 2/2 lulus; suite lengkap (RQ1–RQ6) → menghasilkan
+  `../data/*.csv` asli.
+- **Kubernetes (kind):** app + operator ter-deploy; operator menambal (patch)
+  `terminationGracePeriodSeconds` dari backlog runtime; RQ7 (latensi `tc netem` asli) dan
+  injeksi fail-safe dijalankan di cluster.
+- Koordinatornya adalah **operator GenServer berbasis `kubectl`** (`lib/grace_convergence/operator.ex`),
+  **bukan** Bonny.
 
-## Reproduce
+## Reproduksi
 ```bash
 # BEAM experiments (from code/app), then figures:
 MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/run.exs   # + sweep/repeats/scale
 ~/venv/bin/python analysis/plot.py
 # Kubernetes: see k8s/README.md, then bash k8s/netem.sh and bash k8s/faults.sh
 ```
-Toolchain: Elixir/Erlang/mix + Docker (linuxbrew); `kind` + `kubectl` in `~/.local/bin` — all present.
-**Never `pkill -f '…@127.0.0.1'`** around the harnesses (it matches the running shell → exit 144).
+Toolchain: Elixir/Erlang/mix + Docker (linuxbrew); `kind` + `kubectl` di `~/.local/bin` — semuanya sudah tersedia.
+**Jangan pernah `pkill -f '…@127.0.0.1'`** di sekitar harness (pola itu cocok dengan shell yang sedang berjalan → exit 144).

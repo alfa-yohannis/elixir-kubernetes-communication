@@ -1,5 +1,6 @@
-# The cross-layer coordinator. One replica reads each app pod's /probe, computes the adequate
-# grace, and patches the `grace` Deployment's terminationGracePeriodSeconds (RBAC in rbac.yaml).
+# Koordinator lintas-lapis. Satu replika membaca /probe tiap pod aplikasi, menghitung grace yang
+# memadai, lalu menambal terminationGracePeriodSeconds milik Deployment "grace" (izin di rbac.yaml).
+# Memakai IMAGE yang SAMA dengan aplikasi; env GRACE_ROLE=operator yang mengubahnya jadi operator.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,12 +18,12 @@ spec:
       serviceAccountName: grace-operator
       containers:
         - name: operator
-          image: grace:dev # same image; GRACE_ROLE switches it to the operator
+          image: grace:dev # image yang sama; GRACE_ROLE menjadikannya operator
           imagePullPolicy: IfNotPresent
           env:
             - { name: GRACE_ROLE, value: "operator" }
-            - { name: GRACE_DEPLOYMENT, value: "grace" }
-            - { name: GRACE_SELECTOR, value: "app=grace" }
+            - { name: GRACE_DEPLOYMENT, value: "grace" }      # Deployment yang ditambal
+            - { name: GRACE_SELECTOR, value: "app=grace" }    # selector pod aplikasi
             - { name: GRACE_NAMESPACE, value: "default" }
             - name: RELEASE_COOKIE
               valueFrom: { secretKeyRef: { name: grace-cookie, key: RELEASE_COOKIE } }

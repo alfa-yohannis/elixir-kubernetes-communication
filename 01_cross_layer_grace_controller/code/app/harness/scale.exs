@@ -1,8 +1,8 @@
-# Scalability-to-the-limit: step |H| up until start cost or memory caps out. Streams each size to
-# CSV as it completes (so partial results survive a timeout). Run with a distributed primary:
+# Skalabilitas-hingga-batas: naikkan |H| sampai biaya start atau memori mentok. Men-stream tiap ukuran
+# ke CSV begitu selesai (agar hasil parsial selamat bila timeout). Jalankan dengan primary terdistribusi:
 #   MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/scale.exs
-# Writes data/results_scale.csv. NOTE: the first limit hit is usually Horde.Registry registration
-# (delta-CRDT), not RAM — start_ms is reported separately from handoff throughput for that reason.
+# Menulis data/results_scale.csv. CATATAN: batas pertama yang terhantam biasanya registrasi Horde.Registry
+# (delta-CRDT), bukan RAM — karena itu start_ms dilaporkan terpisah dari throughput handoff.
 
 Node.set_cookie(:ck)
 

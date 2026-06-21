@@ -1,5 +1,8 @@
-# The stateful Elixir/OTP app: headless Service (libcluster discovery), Deployment (with the
-# adaptive preStop hook + readiness probe), and a PodDisruptionBudget.
+# Aplikasi stateful Elixir/OTP di Kubernetes. Berisi empat objek:
+#   1) Secret    : cookie distribusi BEAM (rahasia bersama agar antar-node bisa saling percaya).
+#   2) Service   : Service "headless" untuk penemuan antar-node (libcluster).
+#   3) Deployment: pod-pod aplikasi, dengan preStop hook adaptif + readiness/liveness probe.
+#   4) PodDisruptionBudget: batas berapa pod boleh terganggu sekaligus.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -14,7 +17,7 @@ metadata:
   name: grace-headless
   namespace: default
 spec:
-  clusterIP: None # headless: gives per-pod DNS for BEAM distribution
+  clusterIP: None # headless: memberi DNS per-pod untuk distribusi BEAM (bukan satu IP virtual)
   selector:
     app: grace
   ports:
@@ -36,14 +39,14 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 1 # paced by the operator
+      maxUnavailable: 1 # dipacu (paced) oleh operator
       maxSurge: 1
   template:
     metadata:
       labels: { app: grace }
     spec:
       serviceAccountName: grace
-      # initial grace; the operator patches this to match the runtime handoff need
+      # grace awal; operator menambalnya agar pas dengan kebutuhan handoff saat runtime
       terminationGracePeriodSeconds: 30
       containers:
         - name: grace
@@ -55,6 +58,7 @@ spec:
           env:
             - name: GRACE_ROLE
               value: "app"
+            # POD_IP diambil dari Downward API; dipakai sebagai nama node BEAM (grace@<POD_IP>).
             - name: POD_IP
               valueFrom: { fieldRef: { fieldPath: status.podIP } }
             - name: RELEASE_DISTRIBUTION
@@ -63,16 +67,18 @@ spec:
               value: "grace@$(POD_IP)"
             - name: RELEASE_COOKIE
               valueFrom: { secretKeyRef: { name: grace-cookie, key: RELEASE_COOKIE } }
+          # readiness: kapan pod boleh menerima trafik.
           readinessProbe:
             httpGet: { path: /healthz, port: 4000 }
             periodSeconds: 5
+          # liveness: jika gagal, kubelet me-restart kontainer.
           livenessProbe:
             httpGet: { path: /healthz, port: 4000 }
             periodSeconds: 10
           lifecycle:
             preStop:
               exec:
-                # block termination until the adaptive drain finishes the handoff
+                # tahan terminasi sampai drain adaptif menuntaskan handoff (POST /drain)
                 command: ["/bin/sh", "-c", "wget -q -O- --post-data='' http://127.0.0.1:4000/drain || true"]
 ---
 apiVersion: policy/v1

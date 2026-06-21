@@ -1,0 +1,32 @@
+@startuml
+' Sequence diagram: interaksi antar-modul Elixir saat SATU drain (handoff) lokal berjalan.
+' Tema PlantUML/UML standar (tanpa skinparam khusus). Render: plantuml -tpdf seq_modules.puml
+title Interaksi antar-modul: satu drain (handoff)
+
+participant "Shutdown\n(hook terminasi)" as S
+participant "Probe" as Pr
+participant "Grace\n(policy)" as G
+participant "Handoff" as H
+participant "Workers" as W
+participant "StatefulWorker\n(di survivor)" as SW
+
+S -> Pr : reading()
+Pr --> S : {backlog, rate_eps, t_c_ms}
+S -> G : compute(reading, opts)
+G --> S : grace (detik)
+
+S -> H : drain(grace*1000, rate_limit)
+loop tiap worker, sampai backlog 0 atau tenggat habis
+  H -> W : local() / survivor()
+  W --> H : {id, pid}, node target
+  H -> SW : start_on(target, id, state)
+  SW --> H : {:ok, pid}
+  H -> Pr : record_handoff(1)
+end
+
+alt handoff tuntas sebelum tenggat
+  H --> S : :ok
+else tenggat habis (grace terlalu pendek)
+  H --> S : {:timeout, sisa}  (state hilang)
+end
+@enduml

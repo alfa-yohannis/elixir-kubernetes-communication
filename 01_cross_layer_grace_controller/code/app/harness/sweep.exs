@@ -1,7 +1,7 @@
-# Extended evaluation: A (rollout time), B (overhead), C (load sweep + repeats), D (sensitivity).
-# Launch with a distributed primary (spawns a survivor peer):
+# Evaluasi tambahan: A (waktu rollout), B (overhead), C (sweep beban + pengulangan), D (sensitivitas).
+# Luncurkan dengan primary terdistribusi (yang akan membuat/spawn peer survivor):
 #   MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/sweep.exs
-# Writes data/results_{overhead,sensitivity,sweep,rollout}.csv (real measurements).
+# Menulis data/results_{overhead,sensitivity,sweep,rollout}.csv (pengukuran nyata).
 
 Node.set_cookie(:ck)
 
@@ -25,7 +25,7 @@ alias GraceConvergence.{Harness, Grace}
 data = Path.expand("../../data", File.cwd!())
 File.mkdir_p!(data)
 
-# B — overhead -------------------------------------------------------------
+# B — overhead (latensi probe, memori per-worker, throughput) --------------
 ov = Harness.overhead(200)
 IO.puts("[B] overhead: #{inspect(ov)}")
 File.write!(
@@ -33,7 +33,7 @@ File.write!(
   Harness.csv([ov], [:probe_latency_us, :mem_per_worker_bytes, :handoff_throughput_eps])
 )
 
-# D — sensitivity (pure Grace policy; no cluster needed) -------------------
+# D — sensitivitas (policy Grace murni; tak perlu cluster) -----------------
 base = %{t_c_ms: 50}
 go = fn r, opts -> Grace.compute(Map.merge(base, r), opts) end
 
@@ -48,7 +48,7 @@ sens =
 File.write!(Path.join(data, "results_sensitivity.csv"), Harness.csv(sens, [:kind, :x, :grace_s]))
 IO.puts("[D] sensitivity rows: #{length(sens)}")
 
-# C — load sweep with repeats (curves) -------------------------------------
+# C — sweep beban dengan pengulangan (kurva) -------------------------------
 sweep = Harness.run_sweep([10, 25, 40], 10, 3)
 File.write!(
   Path.join(data, "results_sweep.csv"),
@@ -56,7 +56,7 @@ File.write!(
 )
 IO.puts("[C] sweep rows: #{length(sweep)}")
 
-# A — end-to-end rollout time (3 pods, heavy load) -------------------------
+# A — waktu rollout end-to-end (3 pod, beban berat) ------------------------
 roll = for pol <- [:static30, :static300, :m3], do: Harness.rollout(pol, 3, 400, 10)
 File.write!(
   Path.join(data, "results_rollout.csv"),

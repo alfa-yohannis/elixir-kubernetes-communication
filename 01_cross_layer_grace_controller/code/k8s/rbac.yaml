@@ -1,5 +1,7 @@
-# RBAC for the app (libcluster pod/endpoint discovery) and the operator (read pods, patch the
-# app Deployment's terminationGracePeriodSeconds).
+# RBAC = Role-Based Access Control: izin "siapa boleh melakukan apa" terhadap API Kubernetes.
+# Dua identitas (ServiceAccount) dengan izin paling minimal (least privilege):
+#   * "grace"          (aplikasi): hanya boleh membaca pod/endpoint untuk penemuan libcluster.
+#   * "grace-operator" (operator): membaca pod DAN menambal (patch) Deployment aplikasi.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -14,8 +16,9 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods", "endpoints"]
-    verbs: ["get", "list", "watch"] # libcluster Kubernetes strategy
+    verbs: ["get", "list", "watch"] # untuk strategi Kubernetes milik libcluster
 ---
+# RoleBinding mengikat Role ke ServiceAccount (memberikan izinnya).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -46,7 +49,7 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: ["get", "list", "patch"] # the cross-layer control: patch terminationGracePeriodSeconds
+    verbs: ["get", "list", "patch"] # inti kontrol lintas-lapis: menambal terminationGracePeriodSeconds
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

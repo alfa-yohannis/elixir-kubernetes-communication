@@ -71,15 +71,23 @@ are the **quorum signal** (cluster size + declared `Q`) and the **PDB-patching**
 
 ## Current state (2026-06-29)
 
-**Complete draft.** `paper/` builds (10 pp, RQ1–RQ7, 0 undefined refs). Working artifact
-under `code/` (`quorum.ex`, `cluster.ex`, `quorum_probe.ex`, `pdb_operator.ex`,
-`disruptor.ex`, `harness.ex`, HTTP + k8s manifests + Dockerfile). **Real measurements**
-for all seven RQs in `data/*.csv`; five figures in `figures/`; `code_guide/` (Indonesian)
-builds. Tests: 7 unit + 2 cluster pass. Headline results: static PDB breaks quorum on
-every rollout (N=3–9) while the controller never does; quorum-aware maintenance is 2.9×
-faster than conservative; budget compute is O(1) (~48 ns); on `kind`, the eviction API
-denies the quorum-breaking evictions a static PDB admits.
+**Complete draft at quality parity with paper 01.** `paper/` builds (**14 pp, RQ1–RQ10**,
+0 undefined refs, 0 todo). Working artifact under `code/` (`quorum.ex`, `cluster.ex`,
+`quorum_probe.ex`, `quorum_workload.ex`, `pdb_operator.ex`, `disruptor.ex`, `harness.ex`,
+HTTP + k8s manifests + Dockerfile). **Real measurements** for all ten RQs in `data/*.csv`;
+**8 figures**; `code_guide/` (Indonesian) builds. Tests: 7 unit + 2 cluster pass.
 
-Remaining integration: deploy the full BEAM-cluster image on `kind` and measure the
-operator patching the PDB end-to-end (RQ7 currently validates the eviction-enforcement
-path directly); wide-area membership-flap experiments; a joint M3+M7 evaluation.
+Headline results: static PDB breaks quorum on every rollout (N=3–9), controller never
+does (RQ1, RQ7); a real quorum-gated workload leaves ⌊N/2⌋ survivors unable to commit
+under the static budget, none under ours (RQ8); 2.9× faster than conservative (RQ2); a
+reactive baseline breaks quorum 4× before converging vs 0 (RQ9); desired-size anchoring is
+stable+safe under flapping where live-size churns and turns unsafe (RQ10); O(1) compute
+(~50 ns); eviction API denies quorum-breaking drains on `kind` (RQ7).
+
+**Key design insight (from RQ10):** quorum must be anchored to the *desired* replica count,
+not the *live* size — else a shrinking partition always thinks it has quorum (the very
+split-brain M7 prevents). This is `Cluster.quorum_threshold/1`.
+
+Remaining integration: full BEAM-cluster image on `kind` with the operator patching the
+PDB end-to-end (RQ7 validates the enforcement path directly); wide-area timing dynamics; a
+joint M3+M7 evaluation.

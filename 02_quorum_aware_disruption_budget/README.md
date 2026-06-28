@@ -45,6 +45,9 @@ under any PDB-respecting voluntary disruption the available members never drop b
 | **RQ5** robustness | sensitivity to `q` estimate | under-estimating Q grants an unsafe budget → bias estimate **up** |
 | **RQ6** scalability | compute vs N | flat ~46–49 ns → **O(1)** in cluster size |
 | **RQ7** real cluster | eviction API on `kind` | quorum-derived PDB (minAvailable=Q=3) **denied** quorum-breaking evictions (held avail=3); quorum-unaware PDB let avail fall to 1 < Q |
+| **RQ8** realistic workload | quorum-gated workload under rollout | static budget blocks **⌊N/2⌋** surviving members (Ready but can't commit); quorum-aware **0** |
+| **RQ9** vs reactive baseline | model-free budget that tightens after each break | reactive breaks quorum **4×** before converging; model-based **0** (correct from first probe) |
+| **RQ10** membership flapping | live-size vs desired-size anchoring | naive (live) = **28 PDB patches + 14 unsafe** samples/100; ours (desired) = **0/0** |
 
 ## Layout
 

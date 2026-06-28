@@ -116,6 +116,40 @@ defmodule QuorumBudget.Harness do
   end
 
   @doc """
+  **RQ10 (robustness terhadap flap membership).** Bandingkan dua cara memilih ambang kuorum saat
+  ukuran cluster yang TERLIHAT berkedip (flap) karena gangguan jaringan transien, untuk cluster yang
+  DIINGINKAN berukuran `desired_n` dengan deret ukuran-live `live_sizes`:
+
+    * **naif** (patok ke ukuran live): `minAvailable_t = majority(live_size_t)` -- berubah tiap flap
+      (PDB churn) DAN menjadi tak-aman saat live dip (mengira `majority(ukuran kecil) < Q` sejati,
+      mengizinkan eviction pemecah-kuorum).
+    * **anchored / M7** (patok ke ukuran diinginkan): `minAvailable = majority(desired_n)` konstan ->
+      nol patch, selalu aman.
+
+  Mengembalikan hitungan patch (perubahan minAvailable) dan sampel tak-aman untuk kedua cara.
+  """
+  def flap(desired_n, live_sizes) do
+    true_q = Quorum.majority(desired_n)
+    naive = Enum.map(live_sizes, &Quorum.majority/1)
+
+    naive_patches =
+      naive
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.count(fn [a, b] -> a != b end)
+
+    %{
+      desired_n: desired_n,
+      samples: length(live_sizes),
+      true_q: true_q,
+      naive_patches: naive_patches,
+      naive_unsafe: Enum.count(naive, &(&1 < true_q)),
+      anchored_minavail: true_q,
+      anchored_patches: 0,
+      anchored_unsafe: 0
+    }
+  end
+
+  @doc """
   **RQ3 (adaptivity).** Untuk tiap ukuran cluster `n`, kuorum mayoritas dan budget yang DIHITUNG
   policy (min_available harus melacak `div(n,2)+1`). Pure policy, deterministik.
   """

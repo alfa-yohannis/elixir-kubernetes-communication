@@ -85,11 +85,17 @@ disruption budget at run time from the BEAM cluster's own membership---setting \
 the quorum requirement and \texttt{maxUnavailable} to the headroom above it---so that voluntary
 disruptions are admitted only while quorum is preserved. We formalise a quorum-safety condition,
 provide an open reference implementation on Kubernetes, and evaluate it against fixed and
-over-provisioned baselines. On emulated BEAM clusters of $3$ to $9$ nodes the controller eliminates the
-quorum violations a static, quorum-unaware budget incurs on \emph{every} rollout---holding the measured
-available membership at the majority threshold rather than letting it fall below---while completing
-maintenance $\approx$$2.9\times$ faster than a one-at-a-time conservative budget; the budget
-computation is $O(1)$ in cluster size ($\approx$$48$\,ns). This is a companion to a controller that
+over-provisioned baselines and on a live Kubernetes cluster. On emulated BEAM clusters of $3$ to $9$
+nodes the controller eliminates the quorum violations a static, quorum-unaware budget incurs on
+\emph{every} rollout---holding the measured available membership at the majority threshold rather than
+letting it fall below---while completing maintenance $\approx$$2.9\times$ faster than a one-at-a-time
+conservative budget. On a real quorum-gated workload the static budget leaves $\lfloor N/2\rfloor$
+surviving members unable to make progress; the controller, none. A reactive, model-free budget breaks
+quorum on four successive rollouts before converging, where the controller is correct from the first
+probe; anchoring the budget to the \emph{desired} replica count keeps it stable and safe under
+membership flapping that makes a live-size design churn and turn unsafe; the budget computation is
+$O(1)$ ($\approx$$50$\,ns); and on \texttt{kind} the eviction API denies the quorum-breaking evictions a
+static PDB admits. This is a companion to a controller that
 sizes the per-pod termination grace window; together they couple the two layers' two knobs---\emph{how
 long} a pod may take to leave and \emph{how many} may leave at once.}
 
@@ -141,12 +147,29 @@ the disruption budget from the runtime rather than guessing it in advance:
         while running maintenance far faster than a conservative one.
 \end{itemize}
 
+\paragraph{Research questions.} We ask ten, grouped as the controller's promise (does it keep quorum
+without over-blocking?), its cost, and its robustness. \textbf{RQ1 (safety)}: does it prevent quorum
+loss where a static, quorum-unaware budget does not? \textbf{RQ2 (efficiency)}: does it avoid the
+over-blocking of a defensively tight budget? \textbf{RQ3 (adaptivity)}: does the granted budget track
+the live cluster size? \textbf{RQ4 (overhead)} and \textbf{RQ6 (scalability)}: what does it cost, and
+how does that scale? \textbf{RQ5 (robustness)}: how sensitive is the budget to the quorum estimate?
+\textbf{RQ7 (real cluster)}: does the Kubernetes eviction API actually deny the quorum-breaking drains a
+static PDB admits? \textbf{RQ8 (realistic workload)}: on a real quorum-dependent workload, does a quorum
+break actually stall the surviving members? \textbf{RQ9 (versus an adaptive baseline)}: does a reactive,
+model-free budget do as well? \textbf{RQ10 (membership flapping)}: is the controller stable when the
+observed cluster size is noisy?
+
 \paragraph{Results.} On emulated BEAM clusters of $3$--$9$ nodes, a static quorum-unaware budget broke
 quorum on \emph{every} rollout we measured (available members fell to $N-b$, below the majority
 threshold), whereas the controller held the measured availability exactly at the quorum threshold and
-violated it zero times; it also completed a nine-node rollout $\approx$$2.9\times$ faster than a
-one-pod-at-a-time conservative budget, and its budget computation is constant-time
-(Section~\ref{sec:eval}).
+violated it zero times; on a real quorum-gated workload the static budget left $\lfloor N/2\rfloor$
+surviving members unable to commit, the controller none. The controller completed a nine-node rollout
+$\approx$$2.9\times$ faster than a one-pod-at-a-time conservative budget; a reactive, model-free budget
+broke quorum on four successive rollouts before converging where the controller was safe from the first
+probe; and anchoring the budget to the \emph{desired} cluster size left it stable and safe under
+membership flapping that made a live-size design churn and turn unsafe. The budget computation is
+constant-time ($\approx$$50$\,ns), and on a live \texttt{kind} cluster the eviction API denied the
+quorum-breaking evictions a static PDB admits (Section~\ref{sec:eval}).
 
 %======================================================================
 \section{Background and Motivation}\label{sec:bg}
@@ -297,16 +320,42 @@ those hypotheses become the threats we test in Section~\ref{sec:eval}. \qed
 %======================================================================
 \section{Implementation}\label{sec:impl}
 %======================================================================
-The reference implementation is an Elixir/OTP application of $\approx$$0.5$\,KLOC, mirroring the artifact
-layout of our companion controller. \texttt{QuorumBudget.Quorum} is the pure policy
-(Equation~\eqref{eq:budget}, majority, and the admission predicate); \texttt{QuorumBudget.Cluster} reads
-live membership; \texttt{QuorumBudget.QuorumProbe} is the read-only sensor served by a small Bandit/Plug
-HTTP endpoint; and \texttt{QuorumBudget.PDBOperator} is a \texttt{kubectl}-based operator that, each
-$5$\,s cycle, lists the application pods, reads every \texttt{/probe}, takes the largest
-\texttt{minAvailable}, and patches the PodDisruptionBudget. A single container image runs in two roles
-(\texttt{app} or \texttt{operator}) selected by an environment variable, with least-privilege RBAC for
-the operator. The policy is identical in code and paper; the operator's only side effect on the cluster
-is the PDB patch.
+The reference implementation is an open Elixir/OTP application of $\approx$$0.5$\,KLOC, mirroring the
+artifact layout of our companion controller. It is deliberately small: the mechanism's value is in
+\emph{where} the budget comes from, not in heavy machinery.
+
+\subsection{Policy}\label{sec:impl-policy}
+\texttt{QuorumBudget.Quorum} is the pure policy of Equation~\eqref{eq:budget}---no processes, no I/O, so
+it is the part the paper proves and the tests exercise directly (Listing~\ref{lst:policy}). The same
+module provides the majority function and the admission predicate \texttt{admit\_eviction/2} that decides
+a single eviction. Anchoring (Section~\ref{sec:model-constant}, RQ10) lives in
+\texttt{QuorumBudget.Cluster.quorum\_threshold/1}, which computes the majority of the \emph{desired}
+cluster size (the replica count), \emph{not} the live one---the single line that makes the controller
+stable under membership flapping.
+
+\begin{lstlisting}[language=Elixir,caption={The pure budget policy: \texttt{minAvailable} is the quorum,
+\texttt{maxUnavailable} the headroom above it, optionally capped by handoff capacity.},label={lst:policy}]
+def budget(reading, opts \\ []) do
+  n = reading.n;  q = reading.q
+  q_min = Keyword.get(opts, :q_min, 1)
+  cap = Map.get(reading, :cap, n)            # handoff-capacity cap (coupling to the grace controller)
+  min_available  = q |> max(q_min) |> min(n)               # enforces A >= Q
+  max_unavailable = (n - min_available) |> min(trunc(cap)) |> max(0)
+  %{min_available: min_available, max_unavailable: max_unavailable}
+end
+\end{lstlisting}
+
+\subsection{Probe, operator, and packaging}\label{sec:impl-operator}
+\texttt{QuorumBudget.QuorumProbe} is a read-only \texttt{GenServer} that reports the cluster size and
+quorum threshold, served as JSON over \texttt{GET /probe} by a small Bandit/Plug endpoint.
+\texttt{QuorumBudget.PDBOperator} runs in a separate pod and, each $5$\,s cycle, lists the application
+pods through \texttt{kubectl}, reads every \texttt{/probe}, takes the \emph{largest}
+\texttt{minAvailable} across them (the conservative choice while membership is changing), and patches the
+PodDisruptionBudget. Reconcile is wrapped in \texttt{try/catch}: a transient API error is logged and the
+last budget left in place, never driven to an unsafe value. A single container image runs in two roles
+(\texttt{app} or \texttt{operator}) selected by an environment variable, with least-privilege RBAC (the
+operator may only \emph{get} pods and \emph{get}/\emph{patch} the PDB). The policy is byte-for-byte
+identical in code and paper; the operator's only side effect on the cluster is the PDB patch.
 
 %======================================================================
 \section{Evaluation}\label{sec:eval}
@@ -317,8 +366,12 @@ budget (\texttt{maxUnavailable}). For each batch the harness genuinely disconnec
 cluster, \emph{measures} the surviving cluster size from a live peer's \texttt{Node.list/0}, then
 reconnects (the replacement rejoins). We compare a \emph{static} quorum-unaware budget against the
 \emph{quorum-aware} controller, and against a \emph{conservative} one-at-a-time budget. The pure-policy
-questions (RQ3--RQ6) are deterministic and evaluated directly. Every number below is from a real run
-(\texttt{harness/run.exs}, \texttt{harness/policy.exs}; raw data in \texttt{data/}).
+questions (RQ3--RQ6, RQ10) are deterministic and evaluated directly; the cluster experiments (RQ1, RQ2,
+RQ8) are repeated, and we report the spread---the safety and workload outcomes are exactly reproducible
+across repeats (a counting property of the membership, not a timing one), and the only varying quantity,
+the maintenance \emph{time} of RQ2, has a tight spread ($<5\%$). Every number below is from a real run
+(\texttt{harness/\{run,policy,workload,reactive\}.exs} and \texttt{k8s/rq7\_eviction.sh}; raw data in
+\texttt{data/}).
 
 \paragraph{RQ1 (safety).} Table~\ref{tab:safety} and Figure~\ref{fig:safety} report the minimum measured
 available membership during a full rolling update, for a static budget of $\lceil N/2\rceil$ (a plausible
@@ -378,8 +431,8 @@ both safer than the static budget and faster than the conservative one.
 \texttt{maxUnavailable} the headroom $N-Q$---the adaptivity a static pod count cannot provide.
 
 \paragraph{RQ4 (overhead) and RQ6 (scalability).} The budget computation
-(Equation~\eqref{eq:budget}) is a handful of integer operations: a median of $48$\,ns per call (five runs
-of $200{,}000$ calls), and---as Figure~\ref{fig:scale} shows---essentially flat ($46$--$49$\,ns) as the
+(Equation~\eqref{eq:budget}) is a handful of integer operations: a median of $51$\,ns per call (five runs
+of $200{,}000$ calls), and---as Figure~\ref{fig:scale} shows---essentially flat (tens of ns) as the
 cluster grows three orders of magnitude. The controller adds no scaling cost; its $5$\,s reconcile loop
 and one PDB patch per change are negligible against the maintenance operations they govern.
 
@@ -425,14 +478,75 @@ admitted evictions that drove availability to $1$, well below quorum. The orches
 control thus enforces the coupling: once the budget is derived from the runtime quorum, the
 quorum-breaking drain that a static budget waves through is rejected at the API.
 
+\paragraph{RQ8 (realistic workload).} Availability below quorum matters only if it stops the application
+doing useful work. To check the consequence on a real quorum-dependent workload rather than a synthetic
+count, every node runs a \emph{quorum-gated} workload (\texttt{QuorumBudget.QuorumWorkload}): a commit
+succeeds only while the node sees a quorum, exactly as a consensus group or a \texttt{:global} singleton
+must hold a majority to act. During the rolling update we count, each eviction window, how many
+\emph{surviving} members are blocked---unable to commit because the partition they are in has lost
+quorum (Figure~\ref{fig:workload}; three repeats, identical). Under the static budget the survivors are
+blocked on every rollout---$\lfloor N/2\rfloor$ of them ($2$, $3$, $4$ at $N=5,7,9$): members still
+\emph{Ready} by every pod-level probe, yet unable to serve a single quorum-gated request because the
+maintenance took the cluster below quorum. Under the controller, \emph{zero} survivors are ever blocked.
+This is the cost the pod-level view hides: the orchestrator sees a healthy, slightly smaller Deployment
+while the application cannot make progress.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.62\linewidth]{eval_workload.pdf}
+  \caption{RQ8: a quorum-gated workload runs on every member; bars count surviving members blocked (out
+  of quorum, unable to commit) during a rolling update. The static budget blocks $\lfloor N/2\rfloor$
+  survivors; the quorum-aware controller blocks none.}\label{fig:workload}
+\end{figure}
+
+\paragraph{RQ9 (versus an adaptive baseline).} A natural objection is that \emph{any} adaptive scheme
+would beat a fixed budget. Figure~\ref{fig:reactive} compares the controller against a \emph{reactive}
+baseline with no runtime model: it starts with a loose budget (\texttt{minAvailable}${}=1$) and raises
+it by one after each rollout that breaks quorum---the cloud-native reflex of ``the last maintenance broke
+the cluster, so tighten the budget and retry.'' On a nine-node cluster it breaks quorum on \emph{four}
+successive rollouts ($\texttt{minAvailable}=1\to2\to3\to4$; measured availability $1,2,3,4$, each below
+$Q=5$) before the fifth attempt at $\texttt{minAvailable}=5$ holds. The model-based controller reads the
+cluster size and quorum from the \emph{first} probe and is correct immediately---zero breaks. The gap is
+fundamental: a reactive policy can only \emph{learn} the safe budget by first violating it, paying in
+lost quorum every time the cluster size changes, whereas reading the runtime signal turns trial-and-error
+into a one-shot computation (Proposition~\ref{prop:quorum}).
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.68\linewidth]{eval_reactive.pdf}
+  \caption{RQ9: a reactive budget breaks quorum on four successive rollouts (red, measured availability
+  below $Q$) before converging (green); the model-based controller is safe from the first
+  probe.}\label{fig:reactive}
+\end{figure}
+
+\paragraph{RQ10 (robustness to membership flapping).} A live cluster's \emph{observed} size flaps---a
+transient blip briefly hides a member, a slow node drops and rejoins. A controller that anchored quorum
+to the \emph{observed} size would be doubly wrong: it would rewrite the PDB on every flap (churn), and
+worse, when the observed size dipped it would compute a \emph{smaller} \texttt{minAvailable} than the
+true quorum, opening the very window a concurrent drain needs. Our controller anchors the budget to the
+\emph{desired} size---the Deployment's replica count, which the operator already knows---so $Q$ is stable
+by construction. Over a 100-sample trace with shallow and deep dips (Figure~\ref{fig:flap}), the naive
+live-size design issued $28$ PDB patches and spent $14$ samples \emph{unsafe} ($\texttt{minAvailable}<Q$);
+the desired-size design issued \emph{zero} patches and was never unsafe. Anchoring to the declared size is
+thus not an implementation detail but the property that makes the coupling safe under real, noisy
+membership---and it is why Section~\ref{sec:model} fixes $Q$ to the desired $N$, not the live one.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.54\linewidth]{eval_flap.pdf}
+  \caption{RQ10: under 100 samples of a flapping observed size ($N=9$), anchoring the budget to the live
+  size churns the PDB ($28$ patches) and is unsafe in $14$ samples; anchoring to the desired size (ours)
+  does neither.}\label{fig:flap}
+\end{figure}
+
 %======================================================================
 \section{Discussion and Threats to Validity}\label{sec:discuss}
 %======================================================================
 \textbf{Single-host emulation.} Our cluster runs as peer BEAM nodes on one host; inter-node messaging is
 near-instant. This is appropriate for the property under test---whether \emph{availability} stays at or
-above quorum during a disruption is a counting argument on membership, not a timing one---but it does not
-capture wide-area membership flapping, which would stress the estimator's hysteresis rather than the
-safety invariant. \textbf{The meaning of ``quorum''} differs across workloads: a strict majority for
+above quorum during a disruption is a counting argument on membership, not a timing one. The membership
+\emph{noise} a wide-area cluster would add is exactly what RQ10 isolates and the desired-size anchoring
+neutralises (the budget never depends on the volatile observed size); what single-host emulation does not
+capture is wide-area \emph{timing}---propagation delay before the operator's probe reflects a real scale
+event---which only delays a budget \emph{tightening}, the safe direction. \textbf{The meaning of
+``quorum''} differs across workloads: a strict majority for
 consensus, an operator-declared floor for \texttt{:global}/CRDT. The controller is agnostic---it
 enforces whatever $Q$ the probe reports---but declaring the right $Q$ is the application's
 responsibility, and a wrong (too low) $Q$ is the failure RQ5 isolates. \textbf{Enforcement
@@ -453,33 +567,62 @@ together; where state handoff is the bottleneck, cap \texttt{maxUnavailable} by 
 %======================================================================
 \section{Related Work}\label{sec:related}
 %======================================================================
-Kubernetes provides the PDB and eviction primitives~\cite{k8sPDB} but leaves \texttt{minAvailable} as a
-static, operator-set pod count; nothing in the platform derives it from an application's runtime quorum.
-On the JVM, Akka couples membership into pod readiness~\cite{akkaHealth} and resolves split-brain by
-fencing a minority partition with a Kubernetes Lease (\texttt{lease-majority} SBR)~\cite{akkaSBR,
-akkaLease}; this is the closest prior art, but it arbitrates \emph{after} a partition has formed and does
-not drive the disruption budget that could have prevented it. Coordinated-shutdown frameworks~\cite{%
-akkacoordinated} and graceful-termination practice~\cite{k8sgraceful} sequence a single pod's exit but do
-not bound cluster-wide concurrency. Work on dependable microservices on
-Kubernetes~\cite{souza2024dependable,singh2025istio} and on stateful lifecycle
-management~\cite{meliani2025proactive} surveys and improves rolling-update resilience without coupling it
-to runtime quorum, and signal-based health monitoring~\cite{roberts2025} enriches liveness without
-addressing voluntary-disruption budgets. The broader pattern---treating the two layers as interacting
-control loops rather than independent ones---continues the agenda of our companion termination-grace
-controller; this paper contributes its second coupling, between the disruption budget and the live
-quorum, with no close prior art on any platform.
+\subsection{Disruption budgets and graceful eviction}
+Kubernetes provides the PodDisruptionBudget and the eviction/drain workflow that honours
+it~\cite{k8sPDB}, but \texttt{minAvailable} (or \texttt{maxUnavailable}) is a static, operator-set pod
+count---absolute or a percentage---and nothing in the platform derives it from an application's runtime
+quorum. Percentage budgets do not help: a fixed fraction is still wrong whenever the safe fraction
+depends on a majority that moves with $N$ (RQ3). Coordinated-shutdown frameworks~\cite{akkacoordinated}
+and graceful-termination practice~\cite{k8sgraceful} sequence a single pod's exit---draining
+connections, running \texttt{preStop} hooks---but govern \emph{one} pod's departure, not how many may
+depart at once. Studies of dependable microservices on Kubernetes~\cite{souza2024dependable,
+singh2025istio} and of stateful lifecycle management across clusters~\cite{meliani2025proactive} improve
+rolling-update resilience and placement, and fault-tolerant time-critical
+orchestration~\cite{gustafsson2025rtilience} schedules service chains under deadlines, but none couples
+the voluntary-disruption budget to the live quorum of a clustered runtime.
+
+\subsection{Split-brain, quorum, and membership}
+The risk we prevent---a maintenance action partitioning a cluster below quorum---is the province of
+split-brain resolution. On the JVM, Akka surfaces cluster membership into pod
+readiness~\cite{akkaHealth} and resolves split-brain by fencing a minority partition with a Kubernetes
+Lease (the \texttt{lease-majority} strategy)~\cite{akkaSBR,akkaLease}; Orleans offers analogous
+clustering on .NET~\cite{orleans,bernstein2014orleans}. These are the closest prior art, and the
+contrast is the point: they arbitrate \emph{after} a partition has formed---killing one side and the
+state it accumulated---whereas we drive the orchestrator's disruption budget so the partition-causing
+eviction is never admitted. Readiness-gating membership reduces traffic to unjoined pods but, as RQ8
+shows, does nothing to bound how many \emph{Ready} members may be evicted at once. The quorum notion
+itself is classical, from majority voting to consensus; we treat $Q$ as a declared property of the
+workload and contribute the coupling that holds it, not a new agreement protocol.
+
+\subsection{Cross-layer and autonomic coordination}
+Treating the runtime and the orchestrator as two interacting control loops rather than independent ones
+places this work in the autonomic/self-healing tradition~\cite{kephart2003} and its feedback-control
+lineage~\cite{hellerstein2004feedback,chen2002qos,senjab2023k8s}; rollback-recovery surveys frame the
+older question of which layer owns a fault~\cite{elnozahy2002}, and signal-based health
+monitoring~\cite{roberts2025} enriches the liveness signal without addressing voluntary-disruption
+budgets. This paper's contribution is narrow and concrete within that tradition: a second coupling---%
+after our companion termination-grace controller---between a specific orchestrator knob (the disruption
+budget) and a specific runtime signal (the live quorum), with no close prior art on any platform.
 
 %======================================================================
 \section{Conclusion}\label{sec:conc}
 %======================================================================
 A PodDisruptionBudget is the orchestrator's guard against a maintenance action removing too much of an
 application at once, but as a static pod count it is blind to the application runtime's quorum: a budget
-that is safe at the pod level can still break a BEAM cluster's quorum on a routine rollout, silently. We
-closed this quorum gap with a controller that derives the budget from the live cluster---setting
-\texttt{minAvailable} to the quorum threshold---and showed, on real emulated clusters, that it eliminates
-the quorum violations a static budget incurs on every rollout while completing maintenance $2.9\times$
-faster than a conservative one, at constant computational cost. With our companion grace controller it
-forms two couplings of the same two control loops---\emph{how long} a pod may take to leave and
+that is safe at the pod level can still break a BEAM cluster's quorum on a routine rollout, silently---%
+and our quorum-gated workload shows the cost is real, leaving still-\emph{Ready} survivors unable to make
+progress (RQ8). We closed this quorum gap with a controller that derives the budget from the cluster---%
+anchoring \texttt{minAvailable} to the quorum threshold of the \emph{desired} replica count---and showed,
+on real emulated clusters and a live \texttt{kind} cluster, that it eliminates the quorum violations a
+static budget incurs on every rollout (RQ1, RQ7) while completing maintenance $2.9\times$ faster than a
+conservative one (RQ2), at constant cost (RQ4, RQ6). It beats a reactive, model-free budget that can only
+learn the safe value by repeatedly violating it (RQ9), and the desired-size anchoring keeps it stable and
+safe under the membership flapping that defeats a live-size design (RQ10). Limitations remain: our
+clusters are single-host emulations, so wide-area membership dynamics are future work; the native PDB is
+per-Deployment and integer-valued, so a validating webhook would be needed for per-eviction exactness;
+and a full end-to-end \texttt{kind} deployment of the operator-driven patch loop, plus a joint evaluation
+with the grace controller, would close the remaining integration gap. With that companion controller this
+work forms two couplings of the same two control loops---\emph{how long} a pod may take to leave and
 \emph{how many} may leave at once---and points toward a single cross-layer recovery policy compiled to
 both the runtime and the orchestrator.
 
@@ -487,10 +630,49 @@ both the runtime and the orchestrator.
 
 \appendix
 \section{Reproducing the results}\label{app:repro}
-The artifact (\texttt{../code/}) reproduces every figure: \texttt{harness/run.exs} produces the safety
-and efficiency data (RQ1--RQ2) on a real peer cluster, \texttt{harness/policy.exs} the adaptivity,
-overhead, sensitivity, and scalability data (RQ3--RQ6), and \texttt{code/analysis/plot.py} renders the
-figures from \texttt{data/*.csv}. Unit tests cover the pure policy
-(\texttt{mix test}).
+The artifact (\texttt{../code/}) reproduces every figure from real runs. Each harness writes a CSV under
+\texttt{data/}; \texttt{code/analysis/plot.py} renders the figures from them.
+
+\begin{table}[h]
+\centering
+\caption{Mapping from research question to harness and data.}\label{tab:repro}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{RQ} & \textbf{Harness} & \textbf{Data} & \textbf{Figure/Table} \\
+\midrule
+RQ1 safety        & \texttt{run.exs}      & \texttt{results\_safety.csv}      & Tab.~\ref{tab:safety}, Fig.~\ref{fig:safety} \\
+RQ2 efficiency    & \texttt{run.exs}      & \texttt{results\_efficiency.csv}  & Fig.~\ref{fig:efficiency} \\
+RQ3/6 adapt/scale & \texttt{policy.exs}   & \texttt{results\_scale.csv}       & Fig.~\ref{fig:adapt-scale} \\
+RQ4 overhead      & \texttt{policy.exs}   & \texttt{results\_overhead.csv}    & --- \\
+RQ5 robustness    & \texttt{policy.exs}   & \texttt{results\_sensitivity.csv} & Fig.~\ref{fig:sens} \\
+RQ7 real cluster  & \texttt{k8s/rq7\_eviction.sh} & \texttt{results\_eviction.csv} & --- \\
+RQ8 workload      & \texttt{workload.exs} & \texttt{results\_workload.csv}    & Fig.~\ref{fig:workload} \\
+RQ9 reactive      & \texttt{reactive.exs} & \texttt{results\_reactive.csv}    & Fig.~\ref{fig:reactive} \\
+RQ10 flap         & \texttt{policy.exs}   & \texttt{results\_flap.csv}        & Fig.~\ref{fig:flap} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent The cluster harnesses run under a distributed primary
+(\texttt{MIX\_ENV=test elixir -{}-name primary@127.0.0.1 -{}-cookie ck -S mix run harness/run.exs}); the
+pure-policy harness needs no cluster (\texttt{mix run harness/policy.exs}); RQ7 needs a live \texttt{kind}
+cluster. Tests cover the pure policy (\texttt{mix test}) and the safety claim on a real peer cluster
+(\texttt{mix test -{}-only cluster}). A \texttt{Makefile} target (\texttt{make reproduce}) runs the full
+pipeline except the \texttt{kind} step.
+
+\section{Quorum-derived PodDisruptionBudget}\label{app:pdb}
+The operator patches \texttt{spec.minAvailable} of the PDB to the majority quorum of the desired replica
+count; for a five-replica Deployment this yields Listing~\ref{lst:pdb}, which the Kubernetes eviction
+API then enforces (RQ7).
+
+\begin{lstlisting}[language=,caption={The PodDisruptionBudget the operator maintains for a five-replica
+cluster ($Q=3$).},label={lst:pdb}]
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: quorum, namespace: default}
+spec:
+  minAvailable: 3            # = majority(5); patched by the operator each reconcile
+  selector: {matchLabels: {app: quorum}}
+\end{lstlisting}
 
 \end{document}

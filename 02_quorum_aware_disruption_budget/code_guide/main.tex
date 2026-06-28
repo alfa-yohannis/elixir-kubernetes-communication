@@ -48,10 +48,18 @@ Komponennya kecil dan terpisah tugas:
         $N$, $Q$, dan apakah node sedang berkuorum.
   \item \code{QuorumBudget.PDBOperator} --- \emph{operator} Kubernetes: membaca probe tiap pod lalu
         menambal \code{minAvailable} PDB lewat \code{kubectl}.
+  \item \code{QuorumBudget.QuorumWorkload} --- beban kerja yang bergantung-kuorum (commit hanya bila
+        melihat kuorum), untuk studi kasus RQ8: mengukur konsekuensi nyata saat kuorum pecah.
   \item \code{QuorumBudget.Disruptor} --- mesin eksperimen: mensimulasikan rolling update sungguhan
-        pada cluster peer dan \emph{mengukur} ukuran cluster tersisa.
+        pada cluster peer dan \emph{mengukur} ukuran cluster tersisa + survivor yang terblokir.
   \item \code{QuorumBudget.Harness} --- membungkus pengukuran tiap RQ menjadi baris CSV.
 \end{itemize}
+
+\paragraph{Kunci desain: patok kuorum ke ukuran yang DIINGINKAN.} \code{Cluster.quorum\_threshold/1}
+menghitung mayoritas dari \emph{ukuran cluster yang diinginkan} (jumlah replika Deployment, dari config
+\code{:cluster\_size}), BUKAN ukuran live. Kalau memakai ukuran live, sebuah partisi yang menyusut akan
+selalu mengira \code{majority(ukurannya sendiri)} terpenuhi --- yakni bug split-brain yang justru ingin
+dicegah. Inilah satu baris yang membuat pengendali aman dan stabil saat membership berkedip (RQ10).
 
 \section{Policy Kuorum (\code{quorum.ex})}
 Ini jantung yang dapat dibuktikan. Rumusnya:
@@ -109,18 +117,26 @@ MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/run.
     Menulis \code{data/results\_safety.csv} dan \code{results\_efficiency.csv}. Hasil: budget statis
     memecah kuorum di tiap ukuran; quorum-aware tak pernah; dan quorum-aware $\sim$2,9$\times$ lebih
     cepat daripada konservatif (satu-per-satu).
-  \item[RQ3--RQ6 (policy murni)] \code{MIX\_ENV=test mix run harness/policy.exs} ---
-    \code{results\_scale.csv} (\code{minAvailable} melacak mayoritas; hitung $O(1)$ $\sim$48\,ns),
-    \code{results\_sensitivity.csv} (under-estimasi $Q$ tak aman $\to$ bias ke atas).
+  \item[RQ3--RQ6, RQ10 (policy murni)] \code{MIX\_ENV=test mix run harness/policy.exs} ---
+    \code{results\_scale.csv} (\code{minAvailable} melacak mayoritas; hitung $O(1)$ $\sim$50\,ns),
+    \code{results\_sensitivity.csv} (under-estimasi $Q$ tak aman $\to$ bias ke atas),
+    \code{results\_flap.csv} (RQ10: patok ukuran live $\to$ 28 patch + 14 sampel tak-aman; patok ukuran
+    diinginkan $\to$ 0/0).
   \item[RQ7 (kind)] \code{bash code/k8s/rq7\_eviction.sh} --- pada cluster kind hidup, PDB sadar-kuorum
     (\code{minAvailable}=$Q$) membuat eviction API MENOLAK eviction yang memecah kuorum; PDB
     tak-sadar-kuorum mengizinkannya.
+  \item[RQ8 (workload)] \code{... -S mix run harness/workload.exs} --- beban kerja bergantung-kuorum di
+    tiap node; budget statis memblokir $\lfloor N/2\rfloor$ survivor (tak bisa commit walau "hidup"),
+    quorum-aware 0. \code{results\_workload.csv}.
+  \item[RQ9 (baseline reactive)] \code{... -S mix run harness/reactive.exs} --- baseline yang menaikkan
+    \code{minAvailable} setelah tiap pelanggaran memecah kuorum 4$\times$ sebelum konvergen; model-based
+    0. \code{results\_reactive.csv}.
 \end{description}
 
 \section{Figur \& Tes}
-\code{code/analysis/plot.py} merender lima figur dari \code{data/*.csv}. Tes: \code{mix test}
-(policy murni) dan tes terdistribusi \code{mix test --only cluster} (menegaskan klaim safety pada
-cluster peer sungguhan).
+\code{code/analysis/plot.py} merender delapan figur dari \code{data/*.csv} (RQ1--RQ10). Tes:
+\code{mix test} (policy murni) dan tes terdistribusi \code{mix test --only cluster} (menegaskan klaim
+safety pada cluster peer sungguhan).
 
 \section{Penerapan Kubernetes}
 Manifes di \code{code/k8s/}: \code{rbac.yaml} (hak-paling-kecil: operator boleh baca pod +

@@ -30,4 +30,28 @@ ov_median = ovs |> Enum.sort() |> Enum.at(2)
 File.write!(Path.join(data, "results_overhead.csv"), "reps,budget_compute_ns\n200000,#{ov_median}\n")
 IO.puts("[RQ4] budget_compute_ns (median of 5): #{ov_median}  all=#{inspect(Enum.sort(ovs))}")
 
+# RQ10 (robustness terhadap flap membership): deret ukuran-live yang berkedip (dip transien) untuk
+# cluster diinginkan n. Naif (patok live) churn + tak-aman; anchored/M7 (patok diinginkan) 0 patch, aman.
+flap_series = fn n ->
+  for i <- 0..99 do
+    cond do
+      rem(i, 7) == 3 -> n - 2   # dip dalam (mis. 2 node sesaat tak terlihat)
+      rem(i, 5) == 2 -> n - 1   # dip dangkal
+      true -> n                 # ukuran penuh
+    end
+  end
+end
+
+flap_rows = for n <- [5, 7, 9, 11], do: Harness.flap(n, flap_series.(n))
+File.write!(
+  Path.join(data, "results_flap.csv"),
+  ["desired_n,samples,true_q,naive_patches,naive_unsafe,anchored_minavail,anchored_patches,anchored_unsafe\n" |
+   Enum.map(flap_rows, fn r ->
+     "#{r.desired_n},#{r.samples},#{r.true_q},#{r.naive_patches},#{r.naive_unsafe}," <>
+       "#{r.anchored_minavail},#{r.anchored_patches},#{r.anchored_unsafe}\n"
+   end)]
+)
+IO.puts("[RQ10] flap rows: #{length(flap_rows)} — " <>
+  Enum.map_join(flap_rows, "; ", fn r -> "n=#{r.desired_n} naive(patch=#{r.naive_patches},unsafe=#{r.naive_unsafe}) anchored(0,0)" end))
+
 IO.puts("DONE policy.exs")

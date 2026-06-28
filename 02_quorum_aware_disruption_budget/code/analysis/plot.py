@@ -139,12 +139,81 @@ def sensitivity_fig():
     save(fig, "eval_sensitivity.pdf")
 
 
+def workload_fig():
+    """RQ8: survivor yang TERBLOKIR (out-of-quorum, tak bisa commit) selama rolling update, static vs
+    quorum-aware, lintas N. Static memblokir survivor (cluster tak bisa melayani walau pod 'hidup')."""
+    rs = rows("results_workload.csv")
+    ns = sorted({int(r["n"]) for r in rs})
+    # rata-rata atas ulangan (deterministik, jadi mean = nilai).
+    def avg(pol, n):
+        v = [int(r["blocked_survivors"]) for r in rs if r["policy"] == pol and int(r["n"]) == n]
+        return sum(v) / len(v)
+    static = [avg("static", n) for n in ns]
+    qa = [avg("quorum_aware", n) for n in ns]
+    x = range(len(ns)); w = 0.38
+    fig, ax = plt.subplots(figsize=(5.6, 3.3))
+    ax.bar([i - w / 2 for i in x], static, w, label="static PDB", color=C_UNSAFE)
+    ax.bar([i + w / 2 for i in x], qa, w, label="quorum-aware (ours)", color=C_SAFE)
+    ax.set_xticks(list(x)); ax.set_xticklabels([f"$N={n}$" for n in ns])
+    ax.set_ylabel("blocked survivors\n(cannot commit; quorum lost)")
+    ax.set_title("Quorum-gated workload stalled during rollout (RQ8)")
+    ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+    save(fig, "eval_workload.pdf")
+
+
+def reactive_fig():
+    """RQ9: baseline reactive memecah kuorum berulang (min_observed < Q) sambil menaikkan minAvailable,
+    sampai konvergen; pengendali berbasis-model benar dari percobaan pertama (0 pelanggaran)."""
+    rs = [r for r in rows("results_reactive.csv") if r["policy"] == "reactive"]
+    att = [int(r["attempt"]) for r in rs]
+    obs = [int(r["min_observed"]) for r in rs]
+    q = int(rs[0]["q"])
+    breaks = sum(1 for r in rs if r["violated"] == "true")
+    cols = [C_UNSAFE if r["violated"] == "true" else C_SAFE for r in rs]
+    fig, ax = plt.subplots(figsize=(5.8, 3.4))
+    ax.bar(att, obs, color=cols, width=0.6)
+    ax.axhline(q, ls="--", color="black", lw=1.2, label=f"quorum $Q={q}$")
+    ax.set_xticks(att)
+    ax.set_xlabel("reactive attempt (raise minAvailable after each break)")
+    ax.set_ylabel("min available reached")
+    ax.set_title(f"Reactive baseline breaks quorum {breaks}x before converging\n(model-based controller: 0, from first probe)",
+                 fontsize=9.5)
+    ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+    save(fig, "eval_reactive.pdf")
+
+
+def flap_fig():
+    """RQ10: di bawah flap membership, desain naif (patok ukuran live) churn PDB + jadi tak-aman;
+    desain M7 (patok ukuran diinginkan) 0 patch, 0 tak-aman. Ditunjukkan untuk satu N representatif."""
+    rs = rows("results_flap.csv")
+    r = next(x for x in rs if x["desired_n"] == "9")
+    labels = ["PDB patches\n(churn)", "unsafe samples\n(budget $<Q$)"]
+    naive = [int(r["naive_patches"]), int(r["naive_unsafe"])]
+    anchored = [int(r["anchored_patches"]), int(r["anchored_unsafe"])]
+    x = range(len(labels)); w = 0.38
+    fig, ax = plt.subplots(figsize=(5.2, 3.3))
+    ax.bar([i - w / 2 for i in x], naive, w, label="naive (anchor to live size)", color=C_UNSAFE)
+    ax.bar([i + w / 2 for i in x], anchored, w, label="anchored to desired size (ours)", color=C_SAFE)
+    for i, v in enumerate(naive):
+        ax.text(i - w / 2, v, str(v), ha="center", va="bottom", fontsize=9)
+    for i, v in enumerate(anchored):
+        ax.text(i + w / 2, v, str(v), ha="center", va="bottom", fontsize=9, color=C_SAFE)
+    ax.set_xticks(list(x)); ax.set_xticklabels(labels)
+    ax.set_ylabel("count over 100 flapping samples")
+    ax.set_title("Robustness to membership flapping ($N=9$, RQ10)")
+    ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+    save(fig, "eval_flap.pdf")
+
+
 def main():
     safety_fig()
     efficiency_fig()
     adaptivity_fig()
     scale_fig()
     sensitivity_fig()
+    workload_fig()
+    reactive_fig()
+    flap_fig()
 
 
 if __name__ == "__main__":

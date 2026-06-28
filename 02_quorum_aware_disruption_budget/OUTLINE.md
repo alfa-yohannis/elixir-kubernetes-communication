@@ -66,6 +66,9 @@ quorum without over-blocking maintenance.
 | RQ5 robustness | $q=1\ldots N$, $N=9$ | `maxUnavailable`$=N-q$ linear; under-estimate $Q$ unsafe → bias up |
 | RQ6 scalability | $N=3\ldots10001$ | compute flat ~46–49 ns → **O(1)** |
 | RQ7 real cluster | `kind`, eviction API | quorum-derived PDB **denied** quorum-breaking evictions (held avail$=Q=3$); static let avail fall to 1 |
+| RQ8 realistic workload | quorum-gated workload, 3 reps | static blocks **⌊N/2⌋** surviving members; quorum-aware **0** |
+| RQ9 vs reactive | model-free budget, raise-after-break | reactive breaks quorum **4×** before converging; model-based **0** |
+| RQ10 membership flap | live vs desired anchoring, 100 samples | naive **28 patches + 14 unsafe**; ours **0/0** |
 
 **Testbed:** real peer BEAM cluster (`harness/run.exs`) + pure-policy eval
 (`harness/policy.exs`) + live `kind` eviction test (`k8s/rq7_eviction.sh`). Every number

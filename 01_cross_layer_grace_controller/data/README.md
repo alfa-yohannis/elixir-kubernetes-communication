@@ -13,10 +13,10 @@ CSV outputs from `../code/harness/` (BEAM experiments) and `../code/k8s/` (clust
 | `results_rollout_ci.csv` | `harness/repeats.exs` | rolling-update time × 4 policies × **5 repeats** (reproducibility) |
 | `results_overhead.csv` | `harness/sweep.exs` | controller overhead: probe latency, per-process memory, throughput (RQ4) |
 | `results_sensitivity.csv` | `harness/sweep.exs` | grace sensitivity to σ, g-bounds, ρ-estimate error (RQ5) |
-| `results_scale.csv` | `harness/scale.exs` | per-node scalability, \|H\| 1k→40k: start, mem, drain, throughput, lost (RQ6) |
+| `results_scale.csv` | `harness/scale.exs` | per-node scalability, \|H\| 1k→80k: start, mem, drain, throughput, lost (RQ6) |
 | `results_netem.csv` | `k8s/netem.sh` | **real** inter-pod latency on kind: injected delay → RTT, ρ, grace (RQ7) |
 | `results_presence.csv` | `harness/presence.exs` | Phoenix.Presence (Phoenix.Tracker) convergence vs N: add/re-converge (T_c) (RQ8) |
 
-Columns are self-describing (header row in each file). The scalability cliff is at \|H\|=40k
-(handoff can't finish in a 600 s budget → 19,392/40,000 lost); netem shows ρ≈1/RTT collapsing and the
+Columns are self-describing (header row in each file). The scalability ceiling is near \|H\|≈30–35k
+(under a 600 s budget: 5,632/40,000 and 69,038/80,000 lost); netem shows ρ≈1/RTT collapsing and the
 grace saturating g_max beyond ~100 ms RTT.

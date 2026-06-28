@@ -258,7 +258,7 @@ direktori inti (folder hasil build seperti \code{\_build/} dan \code{deps/} dihi
 |   |   |   |-- run.exs        # tabel 2-beban (RQ1/RQ2)
 |   |   |   |-- sweep.exs      # sweep + rollout + overhead + sensitivitas
 |   |   |   |-- repeats.exs    # pengulangan N=10 / N=5 (confidence interval)
-|   |   |   |-- scale.exs      # |H| 1k..40k (RQ6)
+|   |   |   |-- scale.exs      # |H| 1k..80k (RQ6)
 |   |   |   `-- presence.exs   # konvergensi Phoenix.Presence (RQ8)
 |   |   |-- scripts/
 |   |   |   `-- cluster_probe.exs  # menonton handoff 2-node secara manual
@@ -845,7 +845,7 @@ RQ2 & efficiency (grace \& waktu rollout) & \code{run.exs}, \code{sweep.exs} & \
 RQ3 & adaptivity (grace mengikuti beban) & \code{sweep.exs} (sweep beban) & \code{results\_sweep.csv} $\rightarrow$ \code{eval\_sweep\_grace.pdf} \\
 RQ4 & overhead & \code{sweep.exs} ($\rightarrow$ \code{Harness.overhead/1}) & \code{results\_overhead.csv} \\
 RQ5 & robustness (sensitivitas) & \code{sweep.exs} (bagian D) & \code{results\_sensitivity.csv} $\rightarrow$ \code{eval\_sensitivity.pdf} \\
-RQ6 & scalability ($|H|$ 1k..40k) & \code{scale.exs} ($\rightarrow$ \code{Harness.scale/1}) & \code{results\_scale.csv} $\rightarrow$ \code{eval\_scale.pdf} \\
+RQ6 & scalability ($|H|$ 1k..80k) & \code{scale.exs} ($\rightarrow$ \code{Harness.scale/1}) & \code{results\_scale.csv} $\rightarrow$ \code{eval\_scale.pdf} \\
 RQ7 & network realism (latensi nyata) & \code{k8s/netem.sh} (tc netem di kind) & \code{results\_netem.csv} $\rightarrow$ \code{eval\_netem.pdf} \\
 RQ8 & realistic workload (Phoenix.Presence) & \code{presence.exs} (\code{Phoenix.Tracker}) & \code{results\_presence.csv} $\rightarrow$ \code{eval\_presence.pdf} \\
 \bottomrule
@@ -868,24 +868,25 @@ menyapu kebutuhan handoff \{10, 25, 40\} detik; kurva grace adaptif naik mengiku
 state saat kebutuhan melewatinya).
 
 \paragraph{RQ4 (overhead).} ``Berapa biaya controller (latensi probe, memori per-proses, throughput
-handoff, jejak operator)?'' \code{Harness.overhead/1} mengukur ketiganya. Hasil tercatat: probe
-$\sim$7 µs, $\sim$6{,}7 KB/proses, $\sim$8{,}3k handoff/detik; operator di kind $\sim$73 MiB dan
-$\sim$74 ms reconcile/5 detik.
+handoff, jejak operator)?'' \code{Harness.overhead/1} mengukur ketiganya. Hasil tercatat (median 5×
+saat mesin idle): probe $\sim$4 µs, $\sim$6 KB/proses, $\sim$8k handoff/detik; operator di kind
+$\sim$73 MiB dan $\sim$74 ms reconcile/5 detik.
 
 \paragraph{RQ5 (robustness).} ``Seberapa sensitif grace terhadap margin, batas, dan galat estimasi
 laju?'' Bagian D di \code{sweep.exs} memvariasikan $\sigma \in \{0,5,10,15\}$, $g_{\max} \in \{30,60,
 120,300\}$, dan faktor galat laju $\{0{,}5; 1{,}0; 2{,}0\}$, menghasilkan \code{eval\_sensitivity.pdf}.
 
 \paragraph{RQ6 (scalability).} ``Bagaimana biaya drain satu node menskala dengan backlog $|H|$, dan di
-mana plafon per-node?'' \code{scale.exs} menyapu $|H| = 1\text{k} \rightarrow 40\text{k}$. Memori naik
-linear dan murah ($\sim$4 KB/proc), tetapi throughput handoff \emph{ambruk super-linear}
-(3003 $\rightarrow$ 67 proc/detik) saat registry delta-CRDT terisi. Plafon per-node di $|H|=40$k: node
-tidak selesai drain dalam 600 detik $\rightarrow$ 19.392/40.000 hilang. Figur: \code{eval\_scale.pdf}.
+mana plafon per-node?'' \code{scale.exs} menyapu $|H| = 1\text{k} \rightarrow 80\text{k}$. Memori naik
+linear dan murah ($\sim$4 KB/proc), tetapi throughput handoff efektif \emph{ambruk super-linear}
+(3367 $\rightarrow$ 152 $\rightarrow$ 57 $\rightarrow$ 18 proc/detik) saat registry delta-CRDT terisi.
+Plafon per-node $\approx$30--35k: di bawah anggaran 600 detik, node membuang 5.632/40.000 dan
+69.038/80.000 proses. Figur: \code{eval\_scale.pdf}.
 
 \paragraph{RQ7 (network realism).} ``Di bawah latensi antar-pod nyata, apakah estimasi laju --- dan
 karenanya grace --- mengikuti throughput handoff yang menurun?'' \code{k8s/netem.sh} menyuntik
 \code{tc netem} pada egress pod survivor di kind, mengukur RTT nyata; $\rho \approx 1/\text{RTT}$
-ambruk (23.810 $\rightarrow$ 6{,}7/detik), dan grace naik hingga plafon $g_{\max}$. Figur:
+ambruk (21.700 $\rightarrow$ 6{,}7/detik), dan grace naik hingga plafon $g_{\max}$. Figur:
 \code{eval\_netem.pdf}.
 
 \paragraph{RQ8 (realistic workload).} ``Apakah mekanisme tetap berlaku pada fitur terdistribusi yang
@@ -959,7 +960,7 @@ Menulis \code{results\_runs\_ci.csv} (tabel beban $\times$ 4 policy $\times$ 10 
 \code{results\_rollout\_ci.csv} (rollout $\times$ 4 policy $\times$ 5 ulang). Loss/grace persis
 ter-reproduksi (CI=0); drain $\pm$0{,}003 detik (CI95).
 
-\subsection{RQ6 --- scalability ($|H|$ 1k..40k)}
+\subsection{RQ6 --- scalability ($|H|$ 1k..80k)}
 \begin{lstlisting}[style=sh]
 cd code/app
 MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/scale.exs

@@ -116,7 +116,7 @@ g  = min(g_max, max(g_min, g*))
 - **V3 — Kubernetes:** deploy app + operator pada `kind`, jalankan rolling update, dan reproduksi V2 pada
   cluster nyata (dideklarasikan ter-emulasi satu-host — ancaman terhadap validitas). **DONE** (termasuk skala 6-replika).
 - **V4 — Ketelitian statistik:** ulangi skenario utama (tabel N=10, rollout N=5, `repeats.exs`)
-  dan laporkan mean ± 95% CI. **DONE** — loss/grace persis dapat direproduksi (CI=0), drain ±0.003 s.
+  dan laporkan mean ± 95% CI. **DONE** — loss/grace persis dapat direproduksi (CI=0), drain ±0.005 s.
 - **V5 — Latensi jaringan nyata (RQ7):** suntikkan `tc netem` pada pod kind (`k8s/netem.sh`) dan konfirmasi
   RTT terukur menggerakkan ρ dan grace. **DONE** — ρ≈1/RTT runtuh, grace jenuh di g_max melewati ~100 ms.
 - **V6 — Injeksi fail-safe:** crash-kan operator, beri probe yang tidak dapat dipakai, cabut RBAC API
@@ -142,10 +142,10 @@ g  = min(g_max, max(g_min, g*))
    dari `/probe`), manifest `k8s/` (preStop→`/drain`, PDB, service headless, RBAC), `Dockerfile`.
    V3 dijalankan pada cluster `kind`: cluster BEAM 3-replika via libcluster; operator menambal grace 6→26 s
    dari backlog runtime. (Angka kuantitatif tetap berasal dari M-c; V3 memvalidasi deployment + loop.)
-5. **M-c++ — DONE:** evaluasi yang diperluas untuk RQ4/RQ5 — `harness/sweep.exs` menambahkan overhead (probe ~7 µs,
-   ~6.7 KB/proses, ~8.3k handoff/s), sweep beban dengan pengulangan, dan sensitivitas grace.
-6. **M-e — DONE:** skalabilitas (RQ6) — `harness/scale.exs` menyapu \|H\| 1k→40k → `results_scale.csv`;
-   plafon per-node di 40k (handoff tidak dapat selesai dalam 600 s → 19,392 hilang); memori linier.
+5. **M-c++ — DONE:** evaluasi yang diperluas untuk RQ4/RQ5 — `harness/sweep.exs` menambahkan overhead (probe ~4 µs,
+   ~6 KB/proses, ~8k handoff/s), sweep beban dengan pengulangan, dan sensitivitas grace.
+6. **M-e — DONE:** skalabilitas (RQ6) — `harness/scale.exs` menyapu \|H\| 1k→80k → `results_scale.csv`;
+   plafon per-node ≈30–35k (di bawah anggaran 600 s: 5.632/40k & 69.038/80k hilang); memori linier.
 7. **M-f — DONE (penguatan Q2):** ketelitian statistik (V4, `repeats.exs`), latensi jaringan nyata (V5/RQ7,
    `k8s/netem.sh`), injeksi fail-safe (V6, `k8s/faults.sh`), beban kerja Phoenix.Presence yang realistis
    (V7/RQ8, `harness/presence.exs`), dan `Proposition 1` (bukti keamanan). Paper mendapat §Implementation

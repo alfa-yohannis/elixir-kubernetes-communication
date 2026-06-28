@@ -64,17 +64,17 @@ considered but **dropped — journal closed**.)
   **Result:** fixed 30 s loses 40/160 processes once need>grace; adaptive loses 0 and sizes grace to
   need (16→46 s) vs a fixed 300 s. These numbers are written into the paper (Evaluation/Conclusion/abstract).
 - **M-c+ — extended evaluation (Q2 rigor), DONE:** `code/app/harness/sweep.exs` adds **(A)** end-to-end
-  rolling-update time, **(B)** overhead (probe ~7 µs, ~6.7 KB/process, ~8.3k handoffs/s; operator
+  rolling-update time, **(B)** overhead (probe ~4 µs, ~6 KB/process, ~8k handoffs/s; operator
   ~73 MiB & ~74 ms reconcile/5 s on kind), **(C)** a load sweep (need {10,25,40} s × 4 policies × 3
   repeats → curves with std), and **(D)** sensitivity (σ, g-bounds, ρ-estimate error). Real data in
   `data/results_{sweep,rollout,overhead,sensitivity}.csv`; figures via `analysis/plot.py`. Paper
   Evaluation now has RQ1–RQ5 + 4 new figures (13 pages).
 - **M-c++ — scalability-to-limit (RQ6), DONE:** `code/app/harness/scale.exs` sweeps a single draining
-  node's backlog **|H| = 1k → 40k** (streams each size to `data/results_scale.csv`; figure
+  node's backlog **|H| = 1k → 80k** (streams each size to `data/results_scale.csv`; figure
   `figures/eval_scale.pdf` via `analysis/plot.py`). **Result:** memory scales linearly & cheaply
-  (6→167 MiB, ~4 KB/proc) but handoff throughput **collapses super-linearly** (3003→123→67 proc/s) as
-  the Horde delta-CRDT registry fills. **Per-node ceiling at |H|=40k:** the node can't drain within a
-  600 s budget → **19,392/40,000 lost** (≤20k still drains in 163 s, zero loss). The limit lives in
+  (5→317 MiB, ~4 KB/proc) but effective handoff throughput **collapses super-linearly** (3367→152→57→18 proc/s) as
+  the Horde delta-CRDT registry fills. **Per-node ceiling ≈30–35k:** under a 600 s budget the node
+  abandons **5,632/40,000** and **69,038/80,000** (≤20k still drains in 132 s, zero loss). The limit lives in
   the handoff *substrate* (registry), not the constant-time controller — motivating horizontal scaling
   (bound per-pod |H|) and a sharded registry as future work. Paper now **RQ1–RQ6 + 5 figures, 14 pages**.
   NOTE for re-runs: drive with a distributed primary
@@ -87,13 +87,13 @@ considered but **dropped — journal closed**.)
     grace-safety invariant under a conservative rate estimate (hypotheses map to RQ5/RQ7 and the RQ6
     ceiling). SP&E does **not** want heavy formal methods — this light lemma is the right dose.
   - **Statistical rigor** — `harness/repeats.exs` (N=10 table + N=5 rollout) → `results_runs_ci.csv`,
-    `results_rollout_ci.csv`. Loss/grace exactly reproducible (CI=0), drain ±0.003 s (CI95). Turned
+    `results_rollout_ci.csv`. Loss/grace exactly reproducible (CI=0), drain ±0.005 s (CI95). Turned
     the "single-run" threat into a determinism result.
   - **Invariant figure (RQ1)** — `eval_invariant.pdf` (grace vs need + safety floor); doubles as the
     over-provisioning visual (fixed-300 off-chart).
   - **Real network latency (RQ7)** — `k8s/netem.sh` injects `tc netem` on survivor pods (nsenter into
     pod netns from the kind node; **pause the operator first** or its rollout kills the leaver).
-    Measured RTT tracks injection; ρ≈1/RTT collapses (23 810→6.7/s); grace rises to the g_max cap →
+    Measured RTT tracks injection; ρ≈1/RTT collapses (21 700→6.7/s); grace rises to the g_max cap →
     `eval_netem.pdf`. Directly rebuts the single-host threat.
   - **Fail-safe validation** — `k8s/faults.sh`: operator crash→recovery (idempotent), unusable
     probe→g_max fallback, revoked RBAC→no crash. → `tab:faults`.

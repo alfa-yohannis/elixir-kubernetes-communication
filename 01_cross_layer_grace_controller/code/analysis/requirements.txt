@@ -1,0 +1,4 @@
+# Dependensi Python untuk code/analysis/plot.py (hanya butuh matplotlib; sisanya pustaka standar).
+# Buat virtualenv lalu pasang:
+#   python3 -m venv ~/venv && ~/venv/bin/pip install -r code/analysis/requirements.txt
+matplotlib>=3.5

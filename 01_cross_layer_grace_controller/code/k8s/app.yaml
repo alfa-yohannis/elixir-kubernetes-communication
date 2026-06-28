@@ -52,6 +52,10 @@ spec:
         - name: grace
           image: grace:dev
           imagePullPolicy: IfNotPresent
+          # requests = jaminan minimum bagi scheduler; limits = batas atas (cegah noisy-neighbor/OOM).
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "512Mi" }
           ports:
             - { name: http, containerPort: 4000 }
             - { name: epmd, containerPort: 4369 }

@@ -22,7 +22,8 @@ RUN mix deps.compile && mix release
 FROM elixir:1.16-alpine AS app
 # wget (untuk preStop hook) sudah ada di busybox; tambahkan curl + kubectl untuk peran operator.
 RUN apk add --no-cache curl \
- && curl -sSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl \
+ && ARCH=$(case "$(uname -m)" in x86_64) echo amd64;; aarch64|arm64) echo arm64;; *) echo amd64;; esac) \
+ && curl -sSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/v1.30.0/bin/linux/${ARCH}/kubectl" \
  && chmod +x /usr/local/bin/kubectl
 WORKDIR /app
 # Salin rilis yang sudah dibangun dari tahap "build".

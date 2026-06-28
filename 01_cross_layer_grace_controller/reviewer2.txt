@@ -1,0 +1,35 @@
+I’d give this paper 83/100.
+
+Strengths
+- The paper tackles a real and important systems problem: Kubernetes’ fixed termination grace period does not match the variable time required for stateful BEAM services to drain, hand off state, and converge.
+- The core technical idea is strong and practical, because it uses runtime signals to set grace dynamically instead of guessing a constant in advance.
+- The evaluation supports the main claim: fixed grace periods can lose state under heavier load, while the adaptive controller avoids that loss and reduces over-provisioning.
+
+Technical quality
+- The safety condition is simple and intuitive: graceful termination is safe only when the grace period covers drain, handoff, and convergence time.
+- The controller design is logically coherent, and the implementation shows that the idea is not merely theoretical.
+- The paper also covers useful dimensions beyond correctness, including efficiency, adaptivity, robustness, and scalability.
+
+Weaknesses
+- The main limitation is external validity: most experiments are on a small cluster, which makes production-scale behavior harder to judge.
+- The paper is tightly tied to the BEAM/Kubernetes/Horde/libcluster stack, so generality to other runtimes is suggested more than demonstrated.
+- Some sections are repetitive, and the presentation is denser than it needs to be.
+
+Writing and presentation
+- The paper is well structured overall, but it reads more like a strong technical report than a polished, concise journal article.
+- The arguments are persuasive, though they repeat the same central point several times.
+- The figures and tables appear to support the claims well, but the paper would benefit from a tighter presentation.
+
+Score rationale
+- I would score it high on novelty, engineering relevance, and completeness.
+- I would deduct points for the limited experimental scale and the narrow runtime focus.
+- Overall, this is a strong systems paper with a useful practical contribution, but not yet a broadly general solution.
+
+Breakdown
+- Novelty: 17/20.
+- Technical correctness: 18/20.
+- Evaluation: 16/20.
+- Generality: 13/20.
+- Writing and clarity: 19/20.
+
+Final score: 83/100.

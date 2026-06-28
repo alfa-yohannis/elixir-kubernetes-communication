@@ -63,7 +63,7 @@ defmodule GraceConvergence.Harness do
       backlog: backlog,
       rate: rate,
       rep: rep,
-      need_s: Float.round(backlog / rate, 1),
+      need_s: if(rate > 0, do: Float.round(backlog / rate, 1), else: 0.0),
       grace_s: grace_s,
       drain_ms: drain_ms,
       lost: lost,
@@ -212,6 +212,33 @@ defmodule GraceConvergence.Harness do
         lost: lost
       }
     end
+  end
+
+  # ---- Baseline adaptif pembanding: exponential-backoff grace (vs controller) ------------------
+  @doc """
+  Baseline adaptif "reaktif" TANPA model: mulai dari `g_min`, lalu GANDAKAN grace setiap kali drain
+  terpotong (lost>0), sampai loss-free atau mentok `g_max`. Ini memodelkan operator yang baru menaikkan
+  grace SETELAH melihat kehilangan state — sehingga tiap percobaan yang gagal benar-benar kehilangan
+  state. Kontras dengan controller berbasis-model yang langsung memberi grace tepat (lost=0 sekali
+  jalan). Mengembalikan daftar baris per-percobaan (attempt, grace, lost).
+  """
+  def reactive_backoff(%{backlog: backlog, rate: rate}, g_min \\ 5, g_max \\ 120) do
+    Application.put_env(:grace_convergence, :handoff_rate_limit, rate)
+
+    # Stream.iterate menghasilkan g_min, 2*g_min, 4*g_min, ... (dibatasi g_max). reduce_while berhenti
+    # pada percobaan loss-free pertama, atau saat sudah mencapai g_max.
+    Enum.reduce_while(Stream.iterate(g_min, &min(&1 * 2, g_max)), [], fn g, rows ->
+      cleanup()
+      Probe.reset()
+      Workers.start_many_local(backlog, "rx#{g}_")
+      wait_local(backlog)
+
+      lost = case Handoff.drain(g * 1000, rate) do {:timeout, r} -> r; :ok -> 0 end
+      row = %{attempt: length(rows) + 1, grace_s: g, backlog: backlog, rate: rate, lost: lost}
+      cleanup()
+
+      if lost == 0 or g >= g_max, do: {:halt, rows ++ [row]}, else: {:cont, rows ++ [row]}
+    end)
   end
 
   # Jam monotonic (ms) — alias pendek dipakai di banyak tempat di atas.

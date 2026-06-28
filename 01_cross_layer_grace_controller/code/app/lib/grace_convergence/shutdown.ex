@@ -21,6 +21,7 @@ defmodule GraceConvergence.Shutdown do
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
   @doc "Menjalankan drain secara sinkron (dipakai oleh tes dan oleh jalur SIGTERM/preStop)."
+  @spec drain_and_await() :: map()
   def drain_and_await, do: GenServer.call(__MODULE__, :drain, :infinity)
 
   @impl true

@@ -53,6 +53,7 @@ defmodule GraceConvergence.Operator do
   end
 
   @doc "Satu lintasan reconcile: probe semua pod -> hitung grace -> patch Deployment."
+  @spec reconcile() :: term()
   def reconcile do
     # Untuk tiap IP pod, ambil reading-nya; `r = probe(ip)` di dalam comprehension juga menyaring nil
     # (pod yang gagal di-probe otomatis terlewati).
@@ -84,8 +85,12 @@ defmodule GraceConvergence.Operator do
 
     case :httpc.request(:get, {url, []}, [{:timeout, 2_000}], []) do
       {:ok, {{_, 200, _}, _, body}} ->
-        m = body |> to_string() |> Jason.decode!()
-        %{backlog: m["backlog"], rate_eps: m["rate_eps"], t_c_ms: m["t_c_ms"]}
+        # Pakai Jason.decode/1 (bukan decode!/1): JSON rusak mengembalikan {:error, _}, bukan crash.
+        # Pod yang merespons tidak valid cukup dilewati (fail-safe), tak menjatuhkan operator.
+        case body |> to_string() |> Jason.decode() do
+          {:ok, m} -> %{backlog: m["backlog"], rate_eps: m["rate_eps"], t_c_ms: m["t_c_ms"]}
+          {:error, _} -> nil
+        end
 
       _ ->
         nil

@@ -23,6 +23,7 @@ defmodule GraceConvergence.Handoff do
   (worker/detik, atau `nil`) membatasi laju pemindahan. Mengembalikan `:ok` bila tuntas, atau
   `{:timeout, sisa_backlog}` bila tenggat keburu habis.
   """
+  @spec drain(non_neg_integer(), number() | nil) :: :ok | {:timeout, non_neg_integer()}
   def drain(deadline_ms, rate_limit \\ nil) do
     # Tandai awal drain agar probe tidak salah mengukur laju terhadap drain sebelumnya.
     Probe.mark_drain_start()
@@ -61,32 +62,56 @@ defmodule GraceConvergence.Handoff do
     end
   end
 
-  # Memindahkan SATU worker (key `id`, proses `pid`) ke sebuah survivor.
+  # Memindahkan SATU worker (key `id`, proses `pid`): baca state, hentikan salinan lokal (ini
+  # membebaskan key di registry sehingga bisa didaftarkan ulang di survivor), lalu tempatkan di
+  # survivor. Bila satu survivor menolak berkali-kali, COBA survivor LAIN dulu sebelum menyerah, agar
+  # satu node yang bermasalah tidak langsung menghilangkan state.
   defp handoff_one(id, pid) do
     case Workers.survivor() do
-      # Tidak ada peer untuk dituju.
+      # Tidak ada peer untuk dituju sama sekali.
       nil ->
         :no_survivor
 
-      target ->
-        state = safe_state(pid)                 # 1. baca state worker dulu
-        _ = DynamicSupervisor.terminate_child(@sup, pid)  # 2. hentikan salinan lokal
-        place(id, state, target, 40)            # 3. buat ulang di survivor (dengan beberapa retry)
+      _ ->
+        state = safe_state(pid)                          # 1. baca state worker dulu
+        _ = DynamicSupervisor.terminate_child(@sup, pid) # 2. hentikan salinan lokal
+        place_with_failover(id, state, 3)                # 3. tempatkan, gagal-aman ke survivor lain
         :ok
     end
   end
 
-  # Menempatkan worker di `target` sampai benar-benar mendarat di sana. Argumen terakhir = sisa
-  # percobaan; berhenti pada 0. Lihat penjelasan race CRDT di bawah.
-  defp place(id, _state, _target, 0) do
-    Logger.warning("handoff #{inspect(id)}: gave up placing on survivor")
+  # Habis jatah survivor: state benar-benar hilang. Log ERROR yang eksplisit (bukan sekadar warning)
+  # agar kehilangan ini terlihat jelas, bukan tertelan diam-diam.
+  defp place_with_failover(id, _state, 0) do
+    Logger.error("handoff #{inspect(id)}: STATE LOST -- no survivor accepted placement")
+    :lost
   end
+
+  defp place_with_failover(id, state, survivors_left) do
+    case Workers.survivor() do
+      nil ->
+        Logger.error("handoff #{inspect(id)}: STATE LOST -- no survivor available")
+        :lost
+
+      target ->
+        case place(id, state, target, 20) do
+          :ok -> :ok
+          # gagal di target ini setelah beberapa percobaan -> coba survivor (acak) yang lain
+          :retry -> place_with_failover(id, state, survivors_left - 1)
+        end
+    end
+  end
+
+  # Menempatkan worker di `target`. Mengembalikan `:ok` bila mendarat, atau `:retry` bila gagal setelah
+  # `tries` percobaan (pemanggil lalu mencoba survivor lain). Argumen terakhir = sisa percobaan.
+  defp place(_id, _state, _target, 0), do: :retry
 
   defp place(id, state, target, tries) do
     case Workers.start_on(target, id, state) do
       # Sukses dan benar-benar mendarat di node tujuan -> catat satu handoff di probe.
       {:ok, p} when node(p) == target ->
         Probe.record_handoff(1)
+        :ok
 
       # Registry menolak dengan {:already_started, p}: entri worker lokal yang baru saja dimatikan
       # kadang masih tertinggal sesaat di CRDT, sehingga start dianggap "sudah ada". Jika proses `p`
@@ -94,6 +119,7 @@ defmodule GraceConvergence.Handoff do
       {:error, {:already_started, p}} ->
         if node(p) == target and remote_alive?(p) do
           Probe.record_handoff(1)
+          :ok
         else
           Process.sleep(50)
           place(id, state, target, tries - 1)

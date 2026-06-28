@@ -1,5 +1,5 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Paper M3 -- Target: Software: Practice and Experience (Wiley), Q2
+%% Paper -- Target: Software: Practice and Experience (Wiley), Q2
 %% Closing the Grace Gap: an adaptive terminationGracePeriodSeconds controller
 %% coupling Kubernetes pod termination with BEAM cluster convergence
 %% (Horde handoff + libcluster convergence) for zero-loss rolling updates.
@@ -264,13 +264,11 @@ couples the termination grace period to the runtime's handoff and convergence pr
 Figure~\ref{fig:problem} the pod is still killed at 30\,s with its handoff unfinished.
 
 \medskip\noindent
-What unites these is one structural fact: the \emph{information} needed to choose a correct
-deadline---the runtime's handoff backlog, achievable rate, and convergence state---lives in the
-runtime, while the \emph{control} that enforces the deadline---the grace period and the rollout
-pace---lives in the orchestrator, and nothing carries the former to the latter. Every option above
-either freezes a constant ahead of time or operates within
-a single layer; none establishes a feedback path across the boundary (Table~\ref{tab:existing}).
-Building that path is exactly what our controller does (Section~\ref{sec:design}).
+Every option above either freezes a constant ahead of time or acts within a single layer; none
+establishes a feedback path across the orchestrator/runtime boundary
+(Table~\ref{tab:existing})---which, as Section~\ref{sec:intro} set out, is where the information that
+should size the deadline and the control that enforces it are split. Building that path is exactly
+what our controller does (Section~\ref{sec:design}).
 
 \begin{table}[t]
 \centering
@@ -306,6 +304,9 @@ disappear safely:
   \item allow the cluster to \emph{re-converge}---membership stabilises and registries reconcile---
         taking time $T_c$.
 \end{enumerate}
+Throughout, \emph{drain} refers narrowly to the first step (finishing in-flight work, $T_d$) and
+\emph{handoff} to the second (relocating in-memory state, $|H_p|/\rho$); the two are distinct and
+additive, and ``a drain'' in the implementation denotes one full pass of the handoff loop.
 The orchestrator grants the pod a grace period $g$: it sends \texttt{SIGTERM} at time $0$ and
 \texttt{SIGKILL} at time $g$. Of these quantities, $|H_p|$, $\rho(p)$, $T_d(p)$ and $T_c$ are
 properties of the \emph{runtime under its current load}, whereas $g$ is set by the \emph{orchestrator};
@@ -338,8 +339,7 @@ controller of Section~\ref{sec:design}. We add a safety margin and bounds to
 Equation~\eqref{eq:objective} in the design rather than assume the terms are known exactly.
 
 %====================================================================
-% Reader-facing title carries NO internal label. (Internally this is mechanism M3
-% from the companion report; never surface "M3" to reviewers -- they don't know it.)
+% Reader-facing title and text carry no internal mechanism/milestone label.
 \section{Design of the Grace-Convergence Controller}\label{sec:design}
 \subsection{Overview}\label{sec:design-overview}
 
@@ -371,7 +371,7 @@ Membership layer & Form the runtime cluster; signal membership convergence & lib
 Registry \& handoff layer & Hold stateful processes; hand them off on shutdown & Horde (delta-CRDT) \\
 Convergence probe & Expose handoff backlog, observed handoff rate $\rho$, convergence state & app endpoint \\
 Adaptive termination hook & On \texttt{SIGTERM}: drain, then block until handoff completes (not a fixed sleep) & preStop hook \\
-Coordinator (operator) & Watch pods; compute and patch the grace period; pace \texttt{maxUnavailable} & Bonny operator \\
+Coordinator (operator) & Watch pods; compute and patch the grace period; pace \texttt{maxUnavailable} & \texttt{kubectl}-based operator \\
 Grace-convergence controller \emph{(our contribution)} & Close the loop: set grace $g=f(\text{backlog},\rho,T_c)$ from runtime signals & --- (new) \\
 \bottomrule
 \end{tabular}
@@ -462,8 +462,11 @@ this paper.
 
 \subsection{Safety guarantee}\label{sec:design-safety}
 
-The policy is constructed so that, under a conservative rate estimate, it provably satisfies the
-grace-safety invariant of Equation~\eqref{eq:invariant}.
+The policy is constructed so that, under a conservative rate estimate, it satisfies the grace-safety
+invariant of Equation~\eqref{eq:invariant}. The argument is deliberately elementary---it follows
+directly from the clamp in Algorithm~\ref{alg:grace}, and we claim no heavier formal machinery. Its
+value is not depth but precision: it pins down exactly the two assumptions under which the controller
+is safe and, more usefully, the only two ways it can fail.
 
 \begin{gcprop}[Termination safety]\label{prop:safety}
 Let a pod terminate with drain time $T_d\ge 0$, convergence time $T_c\ge 0$, backlog $H_p$, and
@@ -560,6 +563,20 @@ def reconcile do
 end
 \end{lstlisting}
 
+\paragraph{Grace granularity: per-Deployment, not per-pod.} The prototype patches the
+\emph{Deployment}'s \texttt{terminationGracePeriodSeconds}, so every replica receives the same
+value---the worst case (\texttt{Enum.max}) across the pods' current readings. This is a deliberate
+simplification of the per-pod ideal of Section~\ref{sec:model}: it over-provisions lightly loaded pods
+to the busiest pod's need, trading a little efficiency for a single, race-free write. Two consequences
+follow. First, a Deployment patch takes effect only on \emph{future} terminations, so the operator
+must lead the rollout; our 5\,s reconcile loop is comfortably ahead of the minute-scale handoffs we
+measure, and a burst that outran one cycle would simply reuse the previous (already conservative)
+grace---benign staleness, never an under-grace below $g_{\min}$. Second, \emph{true} per-pod grace is
+now within reach: Kubernetes 1.25+ accepts a \texttt{terminationGracePeriodSeconds} override on the
+\texttt{delete} call itself, which a future operator could set per pod at termination time, removing
+both the over-provisioning and the staleness. We use the Deployment patch here because it needs no
+eviction-path interception and is idempotent across operator restarts (Table~\ref{tab:faults}).
+
 \subsection{Kubernetes packaging}\label{sec:impl-pack}
 The application ships as a multi-stage OCI image (an Elixir release on Alpine). Its pods form a BEAM
 cluster through the libcluster Kubernetes strategy---pod-IP discovery against a headless Service, with
@@ -583,7 +600,7 @@ spec:
 %====================================================================
 \section{Evaluation}\label{sec:eval}
 
-We ask eight questions. \textbf{RQ1 (correctness):} does a fixed grace lose state when the handoff
+We ask ten questions. \textbf{RQ1 (correctness):} does a fixed grace lose state when the handoff
 outlasts it, and does the controller eliminate that loss? \textbf{RQ2 (efficiency):} how much grace
 does the controller grant relative to an over-provisioned fixed grace, and how does each policy
 affect end-to-end rolling-update time? \textbf{RQ3 (adaptivity):} does the granted grace track the
@@ -596,6 +613,9 @@ $|H|$, and where is the per-node ceiling?
 hence the grace granted---track the degraded handoff throughput?
 \textbf{RQ8 (realistic workload):} does the mechanism hold on an unmodified, widely-used distributed
 feature (Phoenix.Presence), and what real convergence time $T_c$ must the grace cover?
+\textbf{RQ9 (multi-node):} does the result hold with several surviving nodes rather than a single
+survivor? \textbf{RQ10 (vs.\ an adaptive baseline):} how does the model-based controller compare to a
+\emph{reactive} policy that raises its grace only after observing loss?
 
 \paragraph{Setup.} We run the open reference implementation on a two-node BEAM cluster (one node
 drains while the other survives); workers are registered cluster-wide and their in-memory state is
@@ -619,7 +639,7 @@ Figure~\ref{fig:eval} plots the two key metrics.
 \centering
 \caption{Measured termination behaviour on a two-node cluster. Light load: $|H|=80$, $\rho=8/$s
 (need $\approx$10\,s). Heavy load: $|H|=160$, $\rho=4/$s (need $\approx$40\,s). \emph{Lost} = stateful
-processes killed mid-handoff when the grace expired. Each cell is the mean of 10 repeats: grace and
+processes killed mid-handoff when the grace expired. Each cell is from 10 repeats: grace and
 loss are exactly reproducible and drain time varies by $<0.01$\,s (95\% CI $\le\pm0.003$\,s),
 confirming determinism (\texttt{data/results\_runs\_ci.csv}).}\label{tab:eval}
 \begin{tabular}{@{}llrrr@{}}
@@ -735,8 +755,8 @@ budget---it pays only for the handoff that actually occurs.
 stateful process adds $\approx 6.7$\,KB; and handoff sustains $\approx 8{,}300$ state transfers per
 second unthrottled. On Kubernetes the operator's resident footprint is $\approx 73$\,MiB (dominated
 by the BEAM VM), and one reconcile cycle---list pods, read every probe, compute, and patch the
-Deployment---takes $\approx 74$\,ms every 5\,s, under 2\% duty. The mechanism's cost is negligible
-against the state it preserves.
+Deployment---takes $\approx 74$\,ms every 5\,s, under 2\% duty. These overheads are small relative to
+the per-process memory and the seconds-scale handoff they govern.
 
 \paragraph{Robustness (RQ5).} Figure~\ref{fig:sens} varies the policy's inputs. The granted grace
 rises linearly with the safety margin $\sigma$ ($21\to36$\,s for $\sigma=0\to15$) and is strictly
@@ -870,17 +890,52 @@ limitation this case study exposes.
   50\,ms estimate; the safety margin $\sigma$ covers it.}\label{fig:presence}
 \end{figure}
 
+\paragraph{Multi-node (RQ9).} To check that the two-node result is not an artifact of a single
+survivor, we repeat the table loads on a four-node cluster (one leaver, three survivors). The outcome
+is identical: under the heavy load the fixed 30\,s and \texttt{preStop} policies still lose exactly
+\emph{40 of 160} processes while the adaptive controller and the 300\,s grace lose none (grace 46\,s,
+drain 40.2\,s), and under light load every policy is loss-free---the loss and grace numbers match the
+two-node case to the second. Handoff also \emph{distributes}: draining 300 processes placed
+$108/95/97$ of them on the three survivors, an even spread, because each transfer targets a random
+survivor. The drain time is unchanged because the bottleneck is the serial leaver---one node hands its
+workers off one at a time---not the survivor count; adding survivors balances \emph{where} state lands
+without changing \emph{whether} it is lost. The single-host emulation remains a threat
+(Section~\ref{sec:discuss}), but the per-survivor count no longer is.
+
+\paragraph{Versus an adaptive baseline (RQ10).} A natural objection is that \emph{any} adaptive scheme
+would beat a fixed grace. Figure~\ref{fig:reactive} compares the controller against a \emph{reactive}
+baseline with no runtime model: it starts at $g_{\min}$ and \emph{doubles} the grace after each
+truncated termination---the cloud-native reflex of ``the last rollout lost state, so raise the timeout
+and retry.'' On the heavy load it needs four terminations to reach a safe grace
+($5\to10\to20\to40$\,s), losing $140$, $120$, and $80$ processes on the three under-provisioned
+attempts (340 in total) before the fourth succeeds. The model-based controller computes the adequate
+grace ($46$\,s) from the \emph{first} probe reading and loses nothing. The gap is fundamental, not
+incidental: a reactive policy can only \emph{learn} the right deadline by first missing it, paying in
+lost state every time the load steps up, whereas reading the runtime signal turns that trial-and-error
+into a one-shot computation.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.78\linewidth]{eval_reactive.pdf}
+  \caption{A reactive exponential-backoff grace (double after each truncation) must fail before it
+  converges: it loses 140, 120, and 80 processes on three under-provisioned attempts
+  ($g=5,10,20$\,s, 340 total) before $g=40$\,s succeeds. The model-based controller computes
+  $g=46$\,s from the first reading and loses none.}\label{fig:reactive}
+\end{figure}
+
 %====================================================================
 \section{Discussion and Threats to Validity}\label{sec:discuss}
-\paragraph{Emulated cluster.} Our measurements come from a two-node cluster on a single host, not a
-multi-machine deployment; the node count and host topology are emulated. The mechanism is
-host-count-agnostic---the controller reads per-pod runtime signals and sets a per-pod grace---so we
-expect the trend to hold on a real cluster, but a multi-machine (or cloud) confirmation run remains
-future work; the Kubernetes deployment (Section~\ref{sec:eval}) likewise ran on a single-host
-\texttt{kind} cluster. We partly close this gap by injecting \emph{real} inter-pod network latency
-with \texttt{tc netem} (RQ7, Figure~\ref{fig:netem}): the rate signal tracks the injected RTT, so the
-single-host efficiency numbers are conservative---a real network only lowers $\rho$, which the
-controller already compensates for by granting more grace.
+\paragraph{Emulated cluster.} Our headline measurements come from a two-node cluster, and we repeated
+them on a \emph{four}-node cluster (one leaver, three survivors) with identical loss and grace and an
+even handoff spread (RQ9)---so the result is not an artifact of a single survivor. All nodes
+nonetheless share one host, so the host topology and the inter-machine network are still emulated, and
+a true multi-machine (or cloud) run remains future work; the Kubernetes deployment
+(Section~\ref{sec:eval}) likewise ran on a single-host \texttt{kind} cluster. Two further measurements
+narrow the gap: injecting \emph{real} inter-pod latency with \texttt{tc netem} (RQ7,
+Figure~\ref{fig:netem}) shows the rate signal tracks the injected RTT---so the single-host efficiency
+numbers are conservative, since a real network only lowers $\rho$, which the controller compensates
+for with more grace---and the four-node run shows the serial-leaver bottleneck, not the survivor
+count, sets the drain time.
 
 \paragraph{Rate estimation.} The controller sizes the grace from the handoff rate $\rho$. In our
 experiments $\rho$ is the known achievable transfer throughput; in production it is estimated online
@@ -889,7 +944,26 @@ margin $\sigma$ and the bounds $g_{\min},g_{\max}$ cap the error, and an unavail
 reading triggers the default-safe fallback (Section~\ref{sec:design-failsafe}). A further limit
 surfaces at extreme backlogs (RQ6): because the handoff substrate's throughput collapses
 super-linearly, a single-snapshot $\rho$ over-estimates the achievable rate and the policy can
-under-provision grace---so $\rho$ should be biased conservatively and per-pod backlog bounded.
+under-provision grace---so $\rho$ should be biased conservatively and per-pod backlog bounded. A
+fairer objection is circularity: in the synthetic sweeps we \emph{set} $\rho$ with a throttle to
+isolate its effect, which risks ``the controller works because $\rho$ is known and stable.'' The
+network-latency experiment (RQ7) is the answer: there $\rho$ is not dictated but \emph{emerges} from
+real \texttt{tc netem} delay, the online EWMA (not a constant) drives the grace, and the controller
+still tracks it---grace rising as the measured rate falls. The mechanism therefore does not depend on
+$\rho$ being handed to it.
+
+\paragraph{Stability and estimator dynamics.} The controller is \emph{feed-forward}, not a
+continuously actuated control loop: the grace is computed \emph{once} per termination from a snapshot
+and never acts back on the handoff rate $\rho$, so there is no feedback path that could oscillate---the
+classic closed-loop instabilities (overshoot, limit cycles) do not arise. What remains is estimator
+\emph{lag}. The rate EWMA with smoothing factor $\alpha=0.3$ has residual error $(1-\alpha)^k$ after
+$k$ samples following a step change in the true rate, so it tracks a new rate to within $10\%$ in about
+seven handoffs and to within $3\%$ in ten; transients shorter than that are absorbed by the margin
+$\sigma$ and the bounds. At cold start, before any handoff has been observed, the probe reports the
+\emph{configured} achievable rate rather than zero or an undefined value
+(Section~\ref{sec:design-probe}), so even the first termination uses a sane grace, and a genuinely
+missing signal triggers the default-safe fallback. The estimator thus lags toward, not past, the safe
+side.
 
 \paragraph{Per-node handoff ceiling.} Scalability (RQ6, Figure~\ref{fig:scale}) is bounded not by
 the controller---whose grace computation is constant-time---but by the cluster-wide registry: its
@@ -936,7 +1010,7 @@ Our findings translate into concrete advice for operators running stateful servi
 
 %====================================================================
 \section{Related Work}\label{sec:related}
-% Position M3 vs: dependable microservices in K8s (JISA 2024), RTilience (TSC
+% Position the controller vs: dependable microservices in K8s (JISA 2024), RTilience (TSC
 % 2025), Istio resilience (Cluster Computing 2025), proactive stateful lifecycle
 % (Computer Communications 2025), eBPF-Shield (SOCA 2025/26), Akka Lease/SBR,
 % Glasgow SCM, Nefele. None tie grace to runtime convergence signals -> the gap.
@@ -951,23 +1025,57 @@ polling it~\cite{roberts2025}. These cross the orchestrator/runtime boundary for
 \emph{placement}, or \emph{recovery}, yet none couples the termination grace period to the runtime's
 handoff and convergence progress---the specific feedback our controller adds.
 
+\paragraph{Adaptive deadlines: an established idea, here instantiated across layers.} Deriving a
+timeout from observed behaviour rather than fixing a constant is a classic distributed-systems
+pattern. Adaptive failure detectors compute a per-link timeout from heartbeat
+history~\cite{chen2002qos}, and the $\varphi$ accrual detector replaces the binary timeout with a
+continuous suspicion level~\cite{hayashibara2004phi}. Feedback control has long been applied to track
+a setpoint in computing systems under varying load~\cite{hellerstein2004feedback}, and orchestrators
+apply the same idea to autoscaling~\cite{senjab2023k8s}. We do \emph{not} claim adaptive deadlines as
+novel. Our contribution is the observation that the orchestrator's \emph{termination} deadline is a
+deadline of exactly this kind, and the closing of the specific control loop between a Kubernetes grace
+period and a BEAM runtime's handoff and convergence signals---a coupling no prior system makes.
+
+\paragraph{State migration.} Evacuating live state from a departing host is studied at every layer.
+Virtual-machine and container live migration relocate an entire instance with minimal
+downtime~\cite{clark2005live,nadgowda2017voyager}; stateful stream processors checkpoint and migrate
+operator state during reconfiguration and rescaling~\cite{carbone2015snapshots,carbone2015flink,
+hoffmann2019megaphone}. Our handoff is the same class of operation one level up---per-process state
+moved between runtime nodes---but the contribution is not the migration mechanism (Horde provides it):
+it is ensuring the orchestrator's kill deadline is long enough for that migration to finish, which the
+migration literature assumes but Kubernetes does not guarantee.
+
 \subsection{Graceful shutdown in other actor runtimes}\label{sec:related-actors}
 % Use the ROLE vocabulary of Table~\ref{tab:roles} so the comparison is about
 % responsibilities, not product names. The point: peer runtimes already provide a
 % graceful-shutdown ROLE, but none DERIVE the orchestrator grace period from runtime
-% convergence signals -- they use configured/static timeouts. That is M3's gap.
+% convergence signals -- they use configured/static timeouts. That is the gap we target.
 
 Other actor runtimes already provide a graceful-shutdown role. Akka's
 \emph{CoordinatedShutdown} runs ordered shutdown phases with per-phase
-timeouts~\cite{akkacoordinated}; Orleans performs graceful silo shutdown with grain
-deactivation~\cite{orleans}. In both, however, the timeouts are \emph{configured
+timeouts~\cite{akkacoordinated}; Orleans, a virtual-actor runtime~\cite{bernstein2014orleans},
+performs graceful silo shutdown with grain deactivation~\cite{orleans}. In both, however, the
+timeouts are \emph{configured
 constants}, internal to the runtime, and are not fed back to the orchestrator's
 termination grace period---so the same grace gap we target can occur. Our controller differs by
 closing an explicit cross-layer feedback loop: the grace period is \emph{derived} at
 run time from convergence signals (handoff backlog, observed rate $\rho$, membership
 convergence) rather than guessed ahead of time (Table~\ref{tab:actor-compare}).
-A multi-runtime implementation is left to future work; here we evaluate the BEAM
-realisation and compare the others qualitatively.
+\paragraph{What porting to another runtime requires.} Generality here is a design property, not just
+an aspiration, because the cross-layer machinery is cleanly separated from the runtime. The grace
+policy (Equation~\eqref{eq:objective}), the safety invariant, the operator's reconcile-and-patch loop,
+and the rollout pacing are entirely runtime-agnostic: they consume one small
+interface---a \emph{drain-progress signal} $\langle$backlog $|H|$, achievable rate $\rho$, convergence
+estimate $T_c\rangle$---and emit a per-pod \texttt{terminationGracePeriodSeconds}. Only two pieces are
+runtime-specific: a read-only \emph{probe} that reports that triple, and a \emph{termination hook}
+that drains and blocks until handoff completes (in our prototype, \texttt{Probe}, $\approx$80 lines,
+and \texttt{Shutdown}+\texttt{Handoff}); everything else is reused unchanged. The signal exists in the
+other runtimes too: Akka's cluster sharding exposes the entities being rebalanced and
+\emph{CoordinatedShutdown} its phase progress, and Orleans' silo shutdown exposes outstanding grain
+deactivations---each is exactly the backlog/progress a probe would report. Porting the controller is
+therefore implementing that probe and hook against the target runtime's APIs and reusing the operator
+and policy verbatim. We benchmark only the BEAM realisation and leave the others as this concrete (but
+unimplemented) recipe rather than a vague claim of portability.
 
 \begin{table}[t]
 \centering

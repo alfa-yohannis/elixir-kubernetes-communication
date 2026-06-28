@@ -20,6 +20,15 @@ spec:
         - name: operator
           image: grace:dev # image yang sama; GRACE_ROLE menjadikannya operator
           imagePullPolicy: IfNotPresent
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+          # Operator tak punya endpoint HTTP, jadi liveness via exec: `bin/grace_convergence pid`
+          # keluar non-nol bila VM BEAM mati -> kubelet me-restart pod.
+          livenessProbe:
+            exec: { command: ["/app/bin/grace_convergence", "pid"] }
+            initialDelaySeconds: 20
+            periodSeconds: 30
           env:
             - { name: GRACE_ROLE, value: "operator" }
             - { name: GRACE_DEPLOYMENT, value: "grace" }      # Deployment yang ditambal

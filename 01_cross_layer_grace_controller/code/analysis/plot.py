@@ -200,6 +200,32 @@ def presence_fig(rs):
     save(fig, "eval_presence.pdf")
 
 
+def reactive_fig(rs):
+    """Baseline adaptif "reaktif" (exponential-backoff grace): tiap percobaan yang grace-nya kurang
+    kehilangan state SEBELUM grace digandakan ke nilai aman. Kontras dengan controller berbasis-model
+    yang langsung benar (lost=0 sekali jalan)."""
+    att = [int(float(r["attempt"])) for r in rs]
+    grace = [float(r["grace_s"]) for r in rs]
+    lost = [int(float(r["lost"])) for r in rs]
+    fig, ax = plt.subplots(figsize=(6.2, 3.6))
+    bars = ax.bar(att, lost, color="#C0504D", width=0.55)
+    # Tandai grace yang dipakai di tiap batang.
+    for b, g in zip(bars, grace):
+        ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 1, f"g={int(g)}s",
+                ha="center", va="bottom", fontsize=8, color="#333333")
+    ax.set_xlabel("termination attempt (reactive backoff)")
+    ax.set_ylabel("stateful processes lost", color="#C0504D")
+    ax.set_xticks(att)
+    axb = ax.twinx()
+    axb.plot(att, grace, marker="D", color="#1F3B73")
+    axb.set_ylabel("grace used (s, doubling)", color="#1F3B73")
+    total = sum(lost)
+    ax.set_title(f"Reactive baseline: {total} lost before converging; controller loses 0 in one shot")
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    save(fig, "eval_reactive.pdf")
+
+
 def netem_fig(rs):
     """Latensi antar-pod NYATA (tc netem di kind, RQ7): delay yang disuntik vs RTT terukur, lalu
     bagaimana laju handoff yang bisa dicapai (~1/RTT) dan grace yang dihasilkan ikut berubah."""
@@ -269,6 +295,8 @@ def main():
         netem_fig(rs)
     if (rs := rows("results_presence.csv")):
         presence_fig(rs)
+    if (rs := rows("results_reactive.csv")):
+        reactive_fig(rs)
     if (rs := rows("results_sweep.csv")):
         sweep_curves(rs)
         invariant_fig(rs)

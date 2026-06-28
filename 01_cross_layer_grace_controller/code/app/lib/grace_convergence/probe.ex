@@ -37,6 +37,7 @@ defmodule GraceConvergence.Probe do
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
   @doc "Mengambil reading probe saat ini (sebuah map) secara sinkron. Dipakai policy & endpoint HTTP."
+  @spec reading() :: map()
   def reading, do: GenServer.call(__MODULE__, :reading)
 
   @doc """
@@ -125,9 +126,16 @@ defmodule GraceConvergence.Probe do
     end
   end
 
-  # Estimasi convergence time sederhana: asumsikan ~50 ms per peer yang terhubung. Ini sengaja kasar
-  # (placeholder) — di cluster nyata sebaiknya umpankan sinyal konvergensi yang benar-benar diukur.
-  defp convergence_ms, do: length(Node.list()) * 50
+  # Estimasi convergence time T_c. Bila operator/admin menyetel nilai TERUKUR lewat config
+  # `:t_c_ms` (mis. ~1500 ms dari studi Phoenix.Presence), pakai itu. Bila tidak, jatuh ke heuristik
+  # kasar ~50 ms per peer — placeholder yang, seperti dicatat di moduledoc, sebaiknya diganti sinyal
+  # konvergensi nyata di produksi.
+  defp convergence_ms do
+    case Application.get_env(:grace_convergence, :t_c_ms) do
+      ms when is_number(ms) and ms >= 0 -> ms
+      _ -> length(Node.list()) * 50
+    end
+  end
 
   # Pembacaan jam monotonic dalam milidetik. "Monotonic" tidak pernah mundur (berbeda dengan jam
   # dinding yang bisa melompat saat jam sistem disetel), jadi tepat untuk mengukur waktu yang berlalu.

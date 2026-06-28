@@ -1,4 +1,4 @@
-%% references.bib -- M3 paper (SP&E target).
+%% references.bib -- the paper (SP&E target).
 %% EVERY entry has a resolvable URL (DOI / arXiv / official doc), and every DOI/ID below
 %% was verified to exist and be accessible via web search. Do NOT add hallucinated entries:
 %% confirm the exact DOI/arXiv/URL before adding any new reference.
@@ -141,4 +141,90 @@
   title        = {Bonny: A Kubernetes operator development framework for Elixir},
   howpublished = {\url{https://github.com/coryodaniel/bonny}},
   url          = {https://github.com/coryodaniel/bonny}, note = {Accessed 2026}
+}
+
+% --- Adaptive timeouts / failure detection ---
+@inproceedings{hayashibara2004phi,
+  author    = {Hayashibara, Naohiro and D{\'e}fago, Xavier and Yared, Rami and Katayama, Takuya},
+  title     = {The $\varphi$ Accrual Failure Detector},
+  booktitle = {Proc. 23rd IEEE Int. Symp. on Reliable Distributed Systems (SRDS)},
+  organization = {IEEE}, publisher = {IEEE},
+  year      = {2004}, pages = {66--78},
+  doi       = {10.1109/RELDIS.2004.1353004},
+  url       = {https://doi.org/10.1109/RELDIS.2004.1353004}
+}
+@article{chen2002qos,
+  author  = {Chen, Wei and Toueg, Sam and Aguilera, Marcos K.},
+  title   = {On the Quality of Service of Failure Detectors},
+  journal = {IEEE Transactions on Computers},
+  volume  = {51}, number = {5}, pages = {561--580}, year = {2002},
+  doi     = {10.1109/12.980014},
+  url     = {https://doi.org/10.1109/12.980014}
+}
+
+% --- Control theory for computing systems / orchestration ---
+@book{hellerstein2004feedback,
+  author    = {Hellerstein, Joseph L. and Diao, Yixin and Parekh, Sujay and Tilbury, Dawn M.},
+  title     = {Feedback Control of Computing Systems},
+  publisher = {Wiley-IEEE Press}, year = {2004},
+  doi       = {10.1002/047166880X},
+  url       = {https://doi.org/10.1002/047166880X}
+}
+@article{senjab2023k8s,
+  author  = {Senjab, Khaldoun and Abbas, Sohail and Ahmed, Naveed and Khan, Atta ur Rehman},
+  title   = {A Survey of {Kubernetes} Scheduling Algorithms},
+  journal = {Journal of Cloud Computing},
+  volume  = {12}, number = {1}, pages = {87}, year = {2023},
+  doi     = {10.1186/s13677-023-00471-1},
+  url     = {https://doi.org/10.1186/s13677-023-00471-1}
+}
+
+% --- Container / VM live migration ---
+@inproceedings{nadgowda2017voyager,
+  author    = {Nadgowda, Shripad and Suneja, Sahil and Bila, Nilton and Isci, Canturk},
+  title     = {Voyager: Complete Container State Migration},
+  booktitle = {Proc. 37th IEEE Int. Conf. on Distributed Computing Systems (ICDCS)},
+  organization = {IEEE}, publisher = {IEEE},
+  year      = {2017},
+  doi       = {10.1109/ICDCS.2017.91},
+  url       = {https://doi.org/10.1109/ICDCS.2017.91}
+}
+@inproceedings{clark2005live,
+  author    = {Clark, Christopher and Fraser, Keir and Hand, Steven and Hansen, Jacob Gorm and Jul, Eric and Limpach, Christian and Pratt, Ian and Warfield, Andrew},
+  title     = {Live Migration of Virtual Machines},
+  booktitle = {Proc. 2nd USENIX Symp. on Networked Systems Design and Implementation (NSDI)},
+  organization = {USENIX Association}, publisher = {USENIX Association},
+  year      = {2005}, pages = {273--286},
+  url       = {https://www.usenix.org/conference/nsdi-05/live-migration-virtual-machines}
+}
+
+% --- Stateful stream processing: checkpointing and state migration ---
+@misc{carbone2015snapshots,
+  author = {Carbone, Paris and F{\'o}ra, Gyula and Ewen, Stephan and Haridi, Seif and Tzoumas, Kostas},
+  title  = {Lightweight Asynchronous Snapshots for Distributed Dataflows},
+  howpublished = {arXiv preprint arXiv:1506.08603},
+  year   = {2015}, note = {arXiv:1506.08603},
+  url    = {https://arxiv.org/abs/1506.08603}
+}
+@article{carbone2015flink,
+  author  = {Carbone, Paris and Katsifodimos, Asterios and Ewen, Stephan and Markl, Volker and Haridi, Seif and Tzoumas, Kostas},
+  title   = {Apache {Flink}: Stream and Batch Processing in a Single Engine},
+  journal = {IEEE Data Engineering Bulletin},
+  volume  = {38}, number = {4}, pages = {28--38}, year = {2015},
+  url     = {http://sites.computer.org/debull/A15dec/p28.pdf}
+}
+@article{hoffmann2019megaphone,
+  author  = {Hoffmann, Moritz and Lattuada, Andrea and McSherry, Frank and Kalavri, Vasiliki and Liagouris, John and Roscoe, Timothy},
+  title   = {Megaphone: Latency-conscious State Migration for Distributed Streaming Dataflows},
+  journal = {Proc. VLDB Endowment},
+  volume  = {12}, number = {9}, pages = {1002--1015}, year = {2019},
+  url     = {http://www.vldb.org/pvldb/vol12/p1002-hoffmann.pdf}
+}
+
+% --- Virtual actors ---
+@techreport{bernstein2014orleans,
+  author      = {Bernstein, Philip A. and Bykov, Sergey and Geller, Alan and Kliot, Gabriel and Thelin, Jorgen},
+  title       = {Orleans: Distributed Virtual Actors for Programmability and Scalability},
+  institution = {Microsoft Research}, address = {Redmond, WA, USA}, number = {MSR-TR-2014-41}, year = {2014},
+  url         = {https://www.microsoft.com/en-us/research/publication/orleans-distributed-virtual-actors-for-programmability-and-scalability/}
 }

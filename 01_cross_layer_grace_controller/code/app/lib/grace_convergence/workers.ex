@@ -25,6 +25,7 @@ defmodule GraceConvergence.Workers do
   @sup GraceConvergence.WorkerSup
 
   @doc "Memulai satu worker di supervisor lokal node INI, opsional dengan `state` awal."
+  @spec start_local(term(), term()) :: DynamicSupervisor.on_start_child()
   def start_local(id, state \\ nil) do
     DynamicSupervisor.start_child(@sup, {StatefulWorker, id: id, state: state})
   end
@@ -82,16 +83,23 @@ defmodule GraceConvergence.Workers do
     Enum.filter(all(), fn {_key, pid} -> node(pid) == Node.self() and Process.alive?(pid) end)
   end
 
-  @doc "Berapa worker hidup yang di-host di node ini."
-  def local_count, do: length(local())
+  @doc """
+  Berapa worker yang di-host di node ini. Memakai `DynamicSupervisor.count_children/1` yang O(1)
+  (supervisor menyimpan hitungannya), BUKAN `length(local())` yang menyapu seluruh registry CRDT
+  setiap kali. Ini penting karena loop drain memanggilnya berkali-kali; versi O(n) lama menjadikan
+  satu drain O(n^2) pada |H| besar.
+  """
+  def local_count, do: DynamicSupervisor.count_children(@sup).active
 
   @doc "Berapa worker yang ada di seluruh cluster."
+  @spec count() :: non_neg_integer()
   def count, do: length(all())
 
   @doc """
   Memilih node yang bertahan sebagai tujuan handoff: peer mana pun yang terhubung, dipilih acak.
   Mengembalikan `nil` saat node ini terisolasi (tak ada peer), sehingga tak ada tempat handoff.
   """
+  @spec survivor() :: node() | nil
   def survivor do
     case Node.list() do
       [] -> nil

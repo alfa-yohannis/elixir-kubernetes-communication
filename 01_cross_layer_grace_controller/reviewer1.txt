@@ -1,0 +1,738 @@
+================================================================================
+OBJECTIVE CRITICAL REVIEW
+Paper: "Closing the Grace Gap" (paper/main.tex)
+Code:  Cross-Layer Grace-Convergence Controller (code/)
+Date:  2026-06-26
+================================================================================
+
+
+================================================================================
+PART I: PAPER REVIEW
+================================================================================
+
+1. PAPER SUMMARY
+----------------
+The paper addresses a cross-layer coordination gap between Kubernetes' pod
+termination mechanism (which enforces a static terminationGracePeriodSeconds
+deadline) and the BEAM runtime's need for variable-length handoff and cluster
+re-convergence when a stateful pod is removed during rolling updates or node
+drains. It argues a fixed grace period is structurally mismatched: too low
+causes state loss via SIGKILL, too high makes rollouts sluggish.
+
+Four claimed contributions:
+  (a) A grace-safety invariant formalizing when termination is safe (Equation 1),
+      plus Proposition 1 proving the policy satisfies it under conservative rate
+      estimation.
+  (b) A cross-layer grace-convergence controller design, described via
+      runtime-agnostic roles.
+  (c) An open reference implementation (~660 LOC Elixir/OTP) with libcluster,
+      Horde, and a Kubernetes operator.
+  (d) An empirical evaluation (RQ1-RQ8) on Kubernetes against static/
+      over-provisioned baselines, covering correctness, efficiency, adaptivity,
+      overhead, robustness, scalability, network-latency realism, and a
+      realistic Phoenix.Presence case study.
+
+
+2. WRITING QUALITY
+------------------
+Strengths:
+  - The writing is generally excellent -- clear, well-organized, and highly
+    readable for a systems paper.
+  - The problem motivation (Section 2, "The Grace Gap") is superbly articulated.
+    The systematic enumeration of why existing approaches fail (Section 2.4,
+    Table 1) is convincing and well-structured.
+  - Technical terminology is used precisely and consistently. The decision to
+    use "roles" (runtime-agnostic) mapped to concrete components (Table 2) is
+    a good abstraction strategy.
+  - The paper flows logically: Background -> Model -> Design -> Implementation
+    -> Evaluation -> Discussion -> Related Work.
+
+Weaknesses:
+  - The paper is quite long (20+ pages with appendices). Some sections are
+    repetitive -- the "grace gap" concept is re-explained across Sections 1,
+    2.3, 2.4, 3.3, and the Discussion.
+  - Section 2.4 ("Why current approaches fall short") is thorough but overlong
+    (~60 lines of TeX with 8 sub-paragraphs). Some could be condensed.
+  - The paper occasionally slips into advocacy tone (e.g., "the mechanism's cost
+    is negligible against the state it preserves") rather than letting data
+    speak.
+  - Some sentences are dense with parentheticals and em-dashes, making parsing
+    difficult on first read.
+
+
+3. NOVELTY AND SIGNIFICANCE
+----------------------------
+Assessment: MODERATE NOVELTY, HIGH PRACTICAL RELEVANCE
+
+  - The core idea -- dynamically deriving the Kubernetes grace period from
+    runtime convergence signals -- is relatively straightforward engineering
+    once the problem is identified. The novelty is more in the framing (the
+    "grace gap" as a cross-layer coordination problem) than algorithmic
+    complexity (the grace computation is essentially T_d + B/rho + T_c + sigma,
+    clamped to bounds).
+  - The problem is real and clearly exists in production deployments.
+  - The systematic analysis of why 8 existing approaches fail (Table 1) is a
+    genuinely useful community contribution.
+  - The formalization (Equation 1, Proposition 1), while simple, is clean and
+    useful.
+  - For SP&E's practice-oriented audience, the artifact and evaluation are
+    appropriate.
+
+Concern: The paper positions itself as if this is entirely novel, but "adaptive
+timeouts based on runtime state" is a well-known distributed systems pattern.
+The novelty claim would be strengthened by precisely scoping what is new (the
+specific Kubernetes<->BEAM coupling) vs. what is a known principle (adaptive
+deadline management).
+
+
+4. METHODOLOGY SOUNDNESS
+-------------------------
+Model (Section 3):
+  - The model is clean and appropriate. The grace-safety invariant (Equation 1)
+    is a natural formalization. The decomposition into drain time, handoff time,
+    and convergence time is well-motivated.
+
+Proposition 1 (Safety):
+  - The proof is correct but trivially so -- it follows immediately from the
+    definitions and clamping logic of Algorithm 1. Calling it a "proposition"
+    with a formal proof may over-sell what is essentially a straightforward
+    bound check. Not a criticism of correctness, but of presentation weight.
+
+Design (Section 4):
+  - Sound. The three-role decomposition (probe, coordinator, hook) is clean.
+    The fail-safe design (default to g_max on missing signals, idempotent
+    assignments) is well-thought-out.
+
+Concern: The model assumes handoff rate rho is roughly constant during a single
+drain. The paper acknowledges (RQ6) that this fails at extreme backlogs but
+doesn't deeply analyze transient dynamics (e.g., what if rho drops mid-drain?).
+The EWMA smoothing is mentioned but not analyzed for convergence or lag.
+
+
+5. EXPERIMENTAL DESIGN AND EVALUATION
+--------------------------------------
+Strengths:
+  - Research questions (RQ1-RQ8) are well-structured and comprehensive.
+  - 10 repeats with reported CIs showing near-deterministic behavior.
+  - Sweep across load levels (Figure 4), invariant validation (Figure 5),
+    sensitivity analysis (Figure 7) go beyond the minimum.
+  - Scalability study (RQ6) honestly reveals a limitation (per-node ceiling
+    due to Horde's CRDT registry).
+  - Network latency injection (RQ7) with tc netem addresses single-host
+    concerns.
+  - Fault injection tests (Table 5) validate fail-safe behavior.
+  - Phoenix.Presence case study (RQ8) adds practical grounding.
+
+Significant Weaknesses:
+
+  W1 - TWO-NODE CLUSTER ONLY: The paper evaluates on a two-node BEAM cluster
+  (one drains, one survives) on a single host. Real deployments have many
+  nodes; handoff to multiple survivors changes dynamics. Network partitions,
+  varied latencies, and concurrent drains are not captured.
+
+  W2 - NO REAL PRODUCTION WORKLOAD AT SCALE: The "realistic workload" (RQ8)
+  uses Phoenix.Presence but only measures convergence time, not end-to-end
+  correctness under the controller.
+
+  W3 - KIND CLUSTER IS A CONFIRMATION RUN: The quantitative results come from
+  a controlled BEAM-cluster experiment, not on Kubernetes. The evaluation
+  doesn't capture real K8s API latency for patching, race conditions between
+  the operator's patch and kubelet's timer, or K8s-specific timing issues.
+
+  W4 - NO COMPETING ADAPTIVE APPROACH: All baselines are static (30s, 300s,
+  preStop sleep). No comparison with any adaptive approach, even a simple
+  exponentially increasing timeout.
+
+  W5 - ARTIFICIALLY CONTROLLED HANDOFF RATE: The paper varies load by rate-
+  limiting rho. In real systems, rho emerges from system behavior. The
+  evaluation is somewhat circular: the controller works because rho is stable
+  and known.
+
+
+6. RESULTS PRESENTATION AND INTERPRETATION
+-------------------------------------------
+Strengths:
+  - Table 3 (main results) is clear and well-formatted.
+  - Figures are well-designed (subfigures, log scales, invariant validation).
+  - The paper is honest about limitations (RQ6 ceiling, RQ8 convergence gap).
+
+Weaknesses:
+  - Results are somewhat unsurprising given the design. The interesting
+    question "under what conditions does this fail?" deserves deeper treatment.
+  - The "40 of 160 processes lost" headline is engineered: the heavy load
+    scenario is specifically designed so handoff exceeds 30s. Real workload
+    handoff time distributions should be discussed.
+  - Rolling-update time advantage over 300s baseline is unclear. If the 300s
+    baseline uses a drain-and-return hook (not a fixed sleep), it would have
+    the same rollout time. This nuance is not clearly explained.
+
+
+7. RELATED WORK COVERAGE
+--------------------------
+Assessment: ADEQUATE BUT THIN
+
+  - Only 16 references -- low for a journal paper. Several are documentation
+    references (K8s docs, Akka docs, Orleans docs).
+  - Missing categories:
+    * Adaptive timeout mechanisms in distributed systems.
+    * Container migration literature (e.g., CRIU-based live migration).
+    * Stateful stream processing frameworks (e.g., Apache Flink checkpoint-
+      based fault tolerance during rescaling).
+    * Virtual actor literature beyond Orleans documentation.
+    * Control theory work on adaptive deadline management.
+  - Related work section (~40 lines of TeX + 1 table) is too short for SP&E.
+
+
+8. SPECIFIC WEAKNESSES (DETAILED)
+-----------------------------------
+  W1: EVALUATION SCALE insufficient for a journal paper. Two nodes, single host,
+      80-160 processes for main results.
+
+  W2: COORDINATOR PATCHES THE DEPLOYMENT, NOT INDIVIDUAL PODS. Uses Enum.max()
+      across all pod readings. All pods get worst-case grace. Contradicts
+      "per-pod" framing. Must be clearly stated with implications.
+
+  W3: RACE CONDITION between operator patch and kubelet timer. Patching the
+      Deployment spec only affects future terminations. Algorithm 1 says
+      "SetGracePeriod -> StartTermination" but implementation patches the
+      Deployment (triggering a rolling update), not individual pod grace.
+
+  W4: DOES NOT DISCUSS K8s terminationGracePeriodSeconds OVERRIDE ON DELETE
+      (available since K8s 1.25). Could enable true per-pod grace patching.
+
+  W5: CIRCULAR REASONING in rho evaluation. Artificially throttled handoff rate
+      doesn't test whether EWMA can track naturally varying rho.
+
+  W6: NO CONTROLLER STABILITY ANALYSIS. Feedback loop but no control-theoretic
+      analysis: oscillation risk, EWMA convergence guarantee.
+
+  W7: LIMITED GENERALIZABILITY BEYOND BEAM. "Runtime-agnostic" claim rests on a
+      single qualitative table (Table 2). No sketch implementation on another
+      runtime.
+
+  W8: PHOENIX.PRESENCE CASE STUDY (RQ8) doesn't run under the controller. Only
+      measures T_c; doesn't demonstrate the full controller loop.
+
+  W9: PAPER/CODE INCONSISTENCY ON BONNY. Table 2 says "Bonny operator." Code
+      and CONTEXT.md say "kubectl-based GenServer operator, NOT Bonny." Direct
+      contradiction that must be resolved.
+
+
+9. SPECIFIC STRENGTHS
+----------------------
+  S1: CRYSTAL-CLEAR PROBLEM FORMULATION. The "grace gap" is genuine, well-
+      identified, and well-motivated. Table 1 analysis is a standalone
+      contribution.
+
+  S2: CLEAN, MINIMAL FORMALIZATION. Equation 1 and Proposition 1 are precise
+      and useful without over-formalizing.
+
+  S3: HONEST ABOUT LIMITATIONS. Openly discusses per-node ceiling (RQ6),
+      convergence estimate gap (RQ8), and single-host threat.
+
+  S4: COMPLETE ARTIFACT. ~660 LOC, open-sourced, with reproduction scripts,
+      CSV data, and K8s manifests. Appendix A is detailed.
+
+  S5: COMPREHENSIVE RQ COVERAGE. Eight research questions across correctness,
+      efficiency, adaptivity, overhead, robustness, scalability, network
+      realism, and realistic workload.
+
+  S6: FAIL-SAFE DESIGN AND VALIDATION. Table 5 (fault injection) shows
+      graceful degradation to conservative defaults.
+
+  S7: PRACTICAL GUIDANCE (Section 7.1). Six actionable recommendations grounded
+      in experimental results.
+
+  S8: GOOD ROLE/COMPONENT SEPARATION. Abstract roles bound to concrete
+      components aids understanding and portability arguments.
+
+
+10. MINOR ISSUES
+-----------------
+  - Internal "M3" terminology in LaTeX comments should be cleaned before
+    archival.
+  - Abstract is result-heavy with specific numbers (16-46s, 40/160 processes);
+    consider more balanced contribution framing.
+  - Table 2 may have LaTeX escaping issues ("\\&" vs "\&").
+  - "handoff" vs. "drain" distinction should be stated explicitly early on.
+  - Reference [5] (Roberts 2025, arXiv:2507.02158) -- verify accessibility.
+  - Table 3 caption says "mean of 10 repeats" but if exactly reproducible, each
+    repeat is identical. Better: "from 10 identical repeats confirming
+    reproducibility."
+  - received/revised/accepted dates are placeholder.
+  - Some figures appear after their first reference.
+
+
+================================================================================
+PART II: CODE REVIEW
+================================================================================
+
+1. CODE SUMMARY
+----------------
+The code implements the Cross-Layer Grace-Convergence Controller -- an
+Elixir/OTP application demonstrating adaptive graceful shutdown coordination
+between a BEAM VM cluster and Kubernetes.
+
+Core Modules (~660 LOC Elixir):
+  - Grace          -- Pure-function policy computation (Equation 2 formula)
+  - Probe          -- GenServer EWMA rate tracker, convergence state sensor
+  - Handoff        -- Drain loop transferring workers one-by-one to survivors
+  - Shutdown       -- OTP terminate trap + preStop hook integration
+  - StatefulWorker -- Synthetic stateful processes needing handoff
+  - Workers        -- Horde.Registry wrapper, survivor selection
+  - WorkerSupervisor -- DynamicSupervisor (deliberately NOT Horde.DynamicSupervisor)
+  - Operator       -- GenServer reconciler using kubectl via System.cmd
+  - ProbeHTTP      -- Plug/Bandit HTTP endpoints (/healthz, /drain, /probe)
+  - Presence       -- Phoenix.Tracker integration for realistic workload
+  - Harness        -- Experiment driver (run/sweep/rollout/overhead/scale)
+  - Application    -- Supervision tree with role-based startup
+
+Supporting:
+  - k8s/       -- Deployment, Service, ServiceAccount, RBAC, ConfigMap, PDB,
+                   Secret manifests
+  - analysis/  -- Python scripts for CSV/log parsing and paper figure generation
+  - tests/     -- Bash harness scripts for kind-cluster experiments (RQ1-RQ8)
+  - Dockerfile -- Multi-stage containerization
+
+
+2. CODE QUALITY AND READABILITY
+---------------------------------
+Rating: VERY GOOD (8/10)
+
+Strengths:
+  - Every module has a substantial @moduledoc explaining not just what it does
+    but WHY and how it fits the bigger picture.
+  - Inline comments are thorough and explain reasoning behind design choices.
+  - Functions are small and focused (most under 15 lines).
+  - Consistent naming conventions (_ms for milliseconds, _eps for events-per-
+    second, _s for seconds).
+  - Type spec on the key public API (Grace.compute/2).
+
+Weaknesses:
+  - COMMENTS AND DOCS ARE IN INDONESIAN, limiting accessibility for
+    international reviewers/replicators. For an SP&E submission targeting an
+    international audience, English would be more appropriate.
+  - @moduledoc strings are quite long -- some modules (e.g., grace.ex: 33 lines
+    of doc for a 108-line module) have more doc than code.
+  - Some terse variable names (e.g., "s" for state in Probe callbacks) could be
+    more descriptive.
+
+
+3. ARCHITECTURE AND DESIGN
+----------------------------
+Rating: EXCELLENT (9/10)
+
+Strengths:
+  - CLEAN SEPARATION OF CONCERNS: Grace policy (pure function, no side effects),
+    Probe (read-only sensor), Handoff (stateful drain), Shutdown (termination
+    hook), Operator (coordination) -- each has single responsibility.
+  - LOCAL-FIRST VALIDATION: Architecture allows full testing of core logic
+    (handoff, grace computation, drain) on a multi-node BEAM cluster without
+    Kubernetes. Smart engineering that de-risks the hardest logic.
+  - DELIBERATE DynamicSupervisor CHOICE: Uses DynamicSupervisor instead of
+    Horde.DynamicSupervisor for hosting workers -- explicitly documented in
+    workers.ex with rationale (Horde's hash-ring could place workers back on
+    the leaving node). Shows genuine framework understanding.
+  - ROLE-BASED STARTUP (GRACE_ROLE env var) allows single Docker image for both
+    app and operator.
+  - FAIL-SAFE DEFAULTS: Unknown rate -> fallback to g_max; probe errors ->
+    operator skips pod; reconcile errors -> caught and logged, not crashed.
+
+Concerns:
+  - KUBECTL SHELL-OUTS: Operator uses System.cmd("kubectl", ...) for all K8s
+    API interactions. Explicitly documented as a deliberate choice (not Bonny),
+    but fragile: shells out for every reconcile cycle, parses JSON output.
+    A proper K8s client library (k8s or kazan hex packages) would be more
+    robust. Acceptable for research prototype but not production.
+  - DEPLOYMENT-LEVEL GRACE PATCHING: Operator patches Deployment's TGPS, not
+    individual pods. All pods share worst-case grace. Conservative but
+    potentially wasteful. Paper should acknowledge this.
+  - CRUDE T_c HEURISTIC: convergence_ms/0 in probe.ex returns
+    length(Node.list()) * 50. Presence experiment shows real T_c ~ 1.5s, which
+    is ~30x this heuristic for a 1-peer cluster. Used in production
+    computations despite being acknowledged as a placeholder.
+
+
+4. ALIGNMENT WITH PAPER CLAIMS
+--------------------------------
+Rating: GOOD (7.5/10) -- mostly aligned with notable gaps
+
+Well-supported claims:
+  - RQ1 (correctness): Code genuinely demonstrates that static30 truncates
+    handoff when B/rho > 30s, while adaptive policy eliminates loss. Unit test
+    at grace_test.exs verifies the formula.
+  - RQ2 (efficiency): rollout/4 measures end-to-end rolling update time.
+  - RQ3 (adaptivity): Sweep harness varies B and rho, shows controller tracking.
+  - RQ4 (overhead): overhead/1 measures probe latency, memory, throughput.
+  - RQ5 (sensitivity): sweep.exs computes grace for varying sigma, g_max, and
+    rho estimation error (pure-function evaluations of Grace.compute).
+  - RQ6 (scalability): scale.exs sweeps |H| from 1k to 80k with real
+    measurements.
+  - RQ7 (network realism): netem.sh injects real tc netem delays.
+  - RQ8 (realistic workload): presence.exs uses unmodified Phoenix.Tracker.
+
+Gaps/concerns:
+  (a) Paper's "Proposition 1" (safety proof): Code implements the invariant via
+      the clamp formula, but there's no formal verification or model checking.
+      The "proof" is the formula implementation plus empirical validation. Fine
+      for SP&E, but should be clearly framed as engineering argument.
+  (b) OPERATOR DOESN'T "PACE" ROLLOUTS as described in DESIGN.md (FR5). The
+      actual operator simply patches TGPS on a 5-second reconcile loop,
+      relying on K8s native rolling update with maxUnavailable:1 and preStop
+      hook blocking. Reasonable simplification but differs from design doc.
+  (c) BONNY INCONSISTENCY: OUTLINE.md mentions Bonny as the operator framework.
+      Actual implementation uses kubectl via System.cmd. OUTLINE.md notes
+      "SUPERSEDED," and CONTEXT.md clarifies. Paper must reflect reality.
+  (d) PER-POD vs. PER-DEPLOYMENT grace: Paper implies per-pod but operator uses
+      Enum.max() across all pods and patches Deployment. Must be clarified.
+
+
+5. TESTING COVERAGE AND QUALITY
+---------------------------------
+Rating: ADEQUATE FOR RESEARCH PROTOTYPE (6.5/10)
+
+What exists:
+  - 6 UNIT TESTS (grace_test.exs): Cover grace computation formula -- normal
+    case, T_c inclusion, g_max clamp, g_min clamp, unknown-rate fallback,
+    configurable fallback. Well-designed, verify core formula.
+  - 2 INTEGRATION TESTS (cluster_handoff_test.exs): Real 2-node BEAM cluster
+    using :peer -- test both successful handoff with state preservation AND
+    timeout truncation (RQ1's core claim). Genuinely meaningful.
+  - Test exclusion mechanism (:cluster tag, test_helper.exs) is proper.
+
+What's missing:
+  - NO TESTS FOR PROBE: EWMA rate calculation, mark_drain_start, reset,
+    configured_rate fallback all untested. The probe is the "sensor" feeding
+    the controller; bugs here could invalidate experimental results.
+  - NO TESTS FOR HANDOFF: Retry logic, place/4 CRDT race handling,
+    remote_alive?/1, safe_state/1 error handling.
+  - NO TESTS FOR SHUTDOWN: Policy selection, terminate/2 hook behavior.
+  - NO TESTS FOR OPERATOR: Reconcile logic, pod IP parsing, probe response
+    parsing, grace patching. Understandable (requires kubectl) but could be
+    tested with mocks.
+  - NO TESTS FOR ProbeHTTP: HTTP endpoint behavior.
+  - NO TESTS FOR Workers: start_on, survivor, local filtering.
+  - NO PROPERTY-BASED TESTS: Grace formula invariants (e.g., "output always in
+    [g_min, g_max]") are excellent candidates for StreamData.
+  - NO NEGATIVE/EDGE-CASE TESTS for probe: NaN rate? Negative backlog?
+
+
+6. ERROR HANDLING AND ROBUSTNESS
+----------------------------------
+Rating: GOOD (7.5/10)
+
+Well-handled:
+  - operator.ex: Reconcile errors caught with try/catch, logged, loop
+    continues. Operator never crashes on transient API failures.
+  - handoff.ex: safe_state/1 catches all errors when reading worker state --
+    prevents cascade failures during drain.
+  - grace.ex: Zero backlog returns 0 handoff time (avoids 0/0). Unknown rate
+    -> :unknown -> fallback (avoids division by zero).
+  - probe.ex: EWMA handles zero-delta timestamps (avoids division by zero).
+  - handoff.ex: Placement retry with bounded attempts (40 tries).
+
+Concerns:
+  - operator.ex: Jason.decode! will crash on malformed JSON from pod probe.
+    Should use Jason.decode/1 and handle {:error, _}. (Caught by outer
+    try/catch but still noisy.)
+  - handoff.ex: DynamicSupervisor.terminate_child(@sup, pid) -- if worker
+    already died, returns {:error, :not_found}. Result is ignored, but
+    subsequently started worker on survivor could duplicate state in a narrow
+    race window.
+  - handoff.ex: handoff_one reads state, kills locally, then places remotely.
+    If placement fails after all retries, worker is lost (state read but never
+    re-placed). Only a Logger.warning is emitted.
+  - probe.ex: convergence_ms placeholder heuristic is used in actual
+    computations. Inaccurate by ~30x.
+  - harness.ex: Division by zero risk: backlog / rate when rate is 0. Harness
+    controls inputs so shouldn't happen, but not guarded.
+  - NO DEADLINE AWARENESS: Code doesn't track remaining time before SIGKILL.
+    Should log warnings when approaching grace period deadline.
+  - EWMA COLD-START: Initial EWMA estimate has no history; early terminations
+    may compute incorrect grace periods.
+
+
+7. DOCUMENTATION QUALITY
+--------------------------
+Rating: EXCELLENT (9/10)
+
+Strengths:
+  - DESIGN.md is outstanding: structured analysis -> requirements -> design ->
+    validation document tracing every decision to a paper RQ.
+  - README.md (both code/ and app/) provide clear reproduction instructions
+    with exact commands.
+  - k8s/README.md maps components to paper concepts with complete deployment
+    recipe.
+  - Module-level documentation is thorough and pedagogical.
+  - Operational gotcha warnings (pkill issue, netem operator interaction)
+    documented in multiple places.
+  - CONTEXT.md provides honest, detailed context including kubectl vs. Bonny
+    discrepancy.
+
+Weakness:
+  - Primary language is Indonesian, limiting accessibility for SP&E's
+    international audience. Should be translated to English.
+
+
+8. KUBERNETES CONFIGURATION QUALITY
+--------------------------------------
+Rating: VERY GOOD (8/10)
+
+Strengths:
+  - RBAC follows least-privilege: app SA gets read access to pods/endpoints;
+    operator SA gets read pods + patch deployments. No cluster-wide permissions.
+  - Headless Service for BEAM node discovery via libcluster K8s strategy.
+  - PodDisruptionBudget with maxUnavailable:1 -- prevents mass eviction.
+  - preStop hook via wget POST /drain -- blocks termination until handoff
+    completes.
+  - Readiness and liveness probes on /healthz.
+  - Secret for BEAM distribution cookie.
+  - Downward API for POD_IP -> BEAM node name.
+
+Concerns:
+  - app.yaml: image: grace:dev with imagePullPolicy: IfNotPresent -- fine for
+    kind but needs adjustment for real registries.
+  - NO RESOURCE REQUESTS/LIMITS on containers. Scheduler can't make informed
+    placement decisions; pods may be OOM-killed.
+  - NO topologySpreadConstraints OR podAntiAffinity. Acceptable for single-node
+    kind but should be noted.
+  - operator.yaml: No liveness/readiness probes on the operator pod. If it
+    hangs, it won't be restarted.
+  - preStop hook uses "|| true" -- failed drain is silently swallowed. This is
+    intentional (fail-safe) but means preStop can't signal failure.
+  - NO NetworkPolicy defined.
+
+
+9. SPECIFIC CODE WEAKNESSES (WITH FILE/LINE REFERENCES)
+---------------------------------------------------------
+  (a) probe.ex:130 -- CRUDE T_c HEURISTIC: length(Node.list()) * 50 ms is
+      hardcoded. Presence experiment shows real T_c ~ 1500ms, 30x this estimate
+      for 1-peer cluster. Placeholder used in actual computations.
+
+  (b) operator.ex:63 -- WORST-CASE GRACE FOR ALL PODS: Enum.max() means the
+      entire Deployment gets the heaviest pod's grace. If one pod has 10k
+      processes and others have 10, all get the 10k grace.
+
+  (c) operator.ex:87 -- Jason.decode! CRASH RISK: Malformed probe response
+      crashes the parse. Caught by outer try/catch but still noisy.
+
+  (d) handoff.ex:72-74 -- STATE LOSS ON PLACEMENT FAILURE: If place() exhausts
+      retries after worker was already killed locally, state is lost. Only a
+      Logger.warning notification.
+
+  (e) harness.ex:66 -- DIVISION BY ZERO RISK: backlog / rate when rate is 0.
+
+  (f) workers.ex:86 -- O(n) LOCAL COUNT ON EVERY DRAIN ITERATION: local()
+      calls all() (full registry select), filters by node and alive, then
+      length/1. For 40k workers (RQ6), this is O(n) per call, O(n^2) total.
+      Likely cause of the scalability ceiling at 40k.
+
+  (g) workers.ex:98 -- Enum.random FOR SURVIVOR SELECTION: In multi-survivor
+      clusters, random selection doesn't balance load. Fine for 2-node
+      experiments but could cause hotspots at scale.
+
+  (h) Dockerfile:22 -- RUNTIME IMAGE USES elixir:1.16-alpine: Includes full
+      Elixir/Erlang toolchain in runtime. Should use plain Alpine for runtime
+      stage (only release binary needed). Bloats image unnecessarily.
+
+  (i) Dockerfile:25 -- KUBECTL BINARY HARDCODED linux/amd64: Won't work on
+      ARM nodes.
+
+  (j) code/tests/ DIRECTORY IS EMPTY (only .gitkeep): All tests are under
+      app/test/. The top-level tests/ directory is misleading.
+
+  (k) NO @spec ON MOST PUBLIC FUNCTIONS: Only Grace.compute/2 has typespec.
+      Probe.reading/0, Handoff.drain/2, Shutdown.drain_and_await/0, etc.
+      all lack specs, reducing Dialyzer coverage.
+
+  (l) ANALYSIS SCRIPTS: No requirements.txt or pyproject.toml. Package versions
+      unspecified.
+
+  (m) NO CI/CD CONFIGURATION: No GitHub Actions, Makefile, or mix task for
+      automated reproduction.
+
+
+10. SPECIFIC CODE STRENGTHS
+-----------------------------
+  (a) GRACE FORMULA IS CLEAN AND CORRECT (grace.ex): Three-clause pattern match
+      for handoff_seconds/1 elegantly handles normal, zero-backlog, and
+      unknown-rate cases. Fail-safe fallback to g_max is principled.
+
+  (b) INTEGRATION TEST IS GENUINELY VALUABLE (cluster_handoff_test.exs): Uses
+      :peer to spawn a real second BEAM node with full application startup via
+      RPC. Tests both successful handoff AND truncation. High-quality test
+      validating the paper's central claim.
+
+  (c) EXPERIMENT HARNESS DESIGN: Clean separation of experiment logic
+      (Harness.run, Harness.scale) from orchestration (.exs scripts spawning
+      peers, writing CSVs). Streaming CSV writes (append mode) protect against
+      data loss if experiments are interrupted.
+
+  (d) FAULT INJECTION SCRIPTS (faults.sh): Testing operator crash recovery,
+      unusable probe fallback, RBAC revocation -- repeatable fail-safe
+      demonstrations, not just claims.
+
+  (e) NETWORK EMULATION (netem.sh): Using nsenter into pod network namespaces
+      for real tc netem injection -- correct approach for kind clusters. Script
+      properly pauses operator to prevent measurement interference.
+
+  (f) PLOT SCRIPT (analysis/plot.py): Well-structured, consistent styling,
+      proper handling of missing CSVs, clear mapping from data to paper figures.
+
+  (g) DynamicSupervisor-OVER-HORDE DESIGN CHOICE (workers.ex): Shows deep
+      understanding of Horde's limitations. Genuinely important engineering
+      decision for correctness, well-documented.
+
+  (h) APPLICATION ROLE SWITCHING (application.ex): Single image, role-based
+      startup via env var -- clean operational model.
+
+
+11. SUGGESTIONS FOR IMPROVEMENT
+---------------------------------
+High priority (for paper submission):
+  (a) Translate comments and docs to English for SP&E audience.
+  (b) Add unit tests for Probe -- especially EWMA correctness and edge cases
+      (zero-delta, negative values).
+  (c) Fix operator.ex:87 -- use Jason.decode/1 instead of Jason.decode!/1 for
+      graceful malformed response handling.
+  (d) Add typespecs to all public functions for documentation and Dialyzer.
+  (e) Document the Deployment-level (not pod-level) grace patching limitation
+      in the paper's threats to validity.
+  (f) Resolve Bonny inconsistency between paper (Table 2) and code.
+
+Medium priority:
+  (g) Optimize Workers.local_count -- cache or use counter rather than
+      enumerating all workers on every drain iteration. Would significantly
+      improve scalability at high |H|.
+  (h) Fix Dockerfile runtime stage -- use alpine:3.19 instead of
+      elixir:1.16-alpine.
+  (i) Add Makefile or mix task for one-command reproduction.
+  (j) Guard harness.ex:66 against division by zero.
+  (k) Make kubectl binary architecture-aware in Dockerfile.
+
+Low priority (nice-to-have):
+  (l) Add property-based tests for Grace.compute using StreamData.
+  (m) Remove empty code/tests/ directory or consolidate tests there.
+  (n) Add resource requests/limits to K8s manifests.
+  (o) Consider replacing System.cmd("kubectl",...) with a proper K8s client.
+  (p) Add operator liveness/readiness probes to operator.yaml.
+
+
+================================================================================
+PART III: OVERALL VERDICT
+================================================================================
+
+PAPER VERDICT: CLOSE TO SP&E THRESHOLD (Q2, IF 3.77) -- MINOR-TO-MODERATE
+REVISION NEEDED
+
+The paper identifies a real, well-motivated problem ("the grace gap"), provides
+clean formalization, builds a working solution, and evaluates it with reasonable
+honesty about limitations. Writing quality is high, the artifact is complete,
+and the fail-safe design is well-validated.
+
+However, the evaluation has significant limitations:
+  - Two-node, single-host setup with artificially controlled handoff rates.
+  - The K8s deployment is a confirmation run, not the main evaluation platform.
+  - No competing adaptive approach in baselines.
+  - Related work is too thin (16 references for a journal paper).
+  - Paper/code Bonny inconsistency must be resolved.
+  - "Per-pod" vs. per-Deployment grace discrepancy needs clarification.
+  - No controller stability analysis (oscillation risk, EWMA convergence).
+
+The paper would benefit from: multi-node evaluation (3-5 nodes), expanded
+related work (25-30 references), at least one adaptive baseline, and clarifying
+the Deployment-level grace patching.
+
+CODE VERDICT: WELL-ENGINEERED RESEARCH PROTOTYPE, CREDIBLE ARTIFACT
+
+The code faithfully implements the paper's architecture. The OTP design is
+clean, the fail-safe behavior is well-implemented, and the experiment harness is
+thoughtfully designed to produce real (not fabricated) measurements. The
+separation of pure policy computation from side-effecting components is
+excellent.
+
+Main weaknesses: limited test coverage beyond core formula and integration
+tests (6 unit + 2 integration), some robustness gaps (Jason.decode!, placement
+failure state loss), the crude T_c heuristic in the probe, and Indonesian
+documentation for an international venue.
+
+For SP&E, the code artifact is credible and honest -- it clearly demonstrates
+the claimed mechanism with real measurements, acknowledges its limitations,
+and provides reproducible experiments.
+
+
+KEY RECOMMENDATIONS FOR PUBLICATION READINESS:
+  1. Expand evaluation to multi-node cluster (3-5 nodes minimum).
+  2. Add at least one competing adaptive baseline.
+  3. Expand related work to 25-30 references (adaptive timeouts, container
+     migration, stateful stream processing, control theory).
+  4. Clarify Deployment-level vs. per-pod grace discrepancy in paper.
+  5. Resolve Bonny inconsistency between paper and code.
+  6. Discuss race condition between operator patch and kubelet timer.
+  7. Add controller stability analysis (oscillation risk, EWMA convergence).
+  8. Translate code comments/docs to English for SP&E audience.
+  9. Add unit tests for Probe (EWMA) and fix Jason.decode! crash risk.
+ 10. Optimize Workers.local_count to address scalability ceiling.
+
+================================================================================
+PART IV: SCORING (1-10)
+================================================================================
+
+Criterion                     Score    Notes
+----------------------------  -------  -----------------------------------------
+Problem Motivation            9   /10  The "grace gap" is crystal-clear, genuine,
+                                       and well-motivated. Table 1 is a
+                                       standalone contribution.
+
+Writing Quality               7.5 /10  Excellent clarity and structure, but too
+                                       verbose with repetition. Some advocacy
+                                       tone instead of letting data speak.
+
+Novelty                       5.5 /10  Adaptive timeouts are a known pattern.
+                                       The K8s<->BEAM framing is useful but not
+                                       deeply novel.
+
+Formalization                 6   /10  Clean but trivial. Proposition 1 is a
+                                       straightforward bound check dressed as a
+                                       formal proof.
+
+Methodology                   6   /10  Sound design, but assumes constant rho,
+                                       no stability analysis, no control-
+                                       theoretic grounding.
+
+Evaluation                    5   /10  Weakest area. 2-node/single-host,
+                                       artificial rho, no adaptive baselines,
+                                       K8s is only a confirmation run.
+
+Related Work                  4.5 /10  Only 16 references -- far too thin for a
+                                       journal paper. Missing entire categories
+                                       (adaptive timeouts, container migration,
+                                       stream processing, control theory).
+
+Artifact / Code               8   /10  Complete, honest, reproducible. Faithfully
+                                       implements the design. Clean OTP
+                                       architecture with fail-safe defaults.
+
+Practical Value               8   /10  Immediately applicable patterns. Section
+                                       7.1 guidance is actionable. Real problem
+                                       with real solution.
+
+Honesty / Rigor               7.5 /10  Openly discusses limitations (RQ6 ceiling,
+                                       RQ8 gap, single-host threat). Bonny
+                                       inconsistency is a blemish.
+
+----------------------------  -------  -----------------------------------------
+OVERALL SCORE                 6.5 /10
+----------------------------  -------  -----------------------------------------
+
+A solid practice-and-experience contribution with a real problem, clean design,
+and honest artifact -- but held back significantly by an undersized evaluation
+(the 2-node single-host setup is the elephant in the room), thin related work,
+and moderate novelty. It is on the borderline for SP&E (Q2, IF 3.77).
+
+With a multi-node evaluation, adaptive baselines, and expanded references, it
+could reach 7.5-8.0.
+
+================================================================================
+END OF REVIEW
+================================================================================

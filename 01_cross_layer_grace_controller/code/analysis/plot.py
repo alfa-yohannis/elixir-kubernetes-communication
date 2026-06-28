@@ -264,11 +264,21 @@ def scale_fig(rs):
     (panel kiri) serta memori yang bertambah (panel kanan)."""
     H = [int(float(r["backlog"])) for r in rs]
     drain = [float(r["drain_ms"]) / 1000 for r in rs]
-    thr = [float(r["throughput_eps"]) for r in rs]
+    lost = [int(float(r.get("lost", 0) or 0)) for r in rs]
+    # Throughput EFEKTIF = worker yang benar-benar di-handoff / waktu drain. Untuk baris yang tuntas
+    # (lost=0) ini sama dengan backlog/drain; untuk baris yang KENA cap (drain mentok di budget,
+    # lost>0) ini memberi laju sebenarnya, bukan backlog/budget yang menyesatkan (bisa naik-palsu saat
+    # backlog membesar). Semua dari kolom terukur asli (backlog, lost, drain_ms).
+    thr = [(h - l) / d for h, l, d in zip(H, lost, drain)]
     mem = [float(r["mem_mb"]) for r in rs]
+    budget_s = round(max(drain))  # baris kena-cap mentok di sini (mis. 600 s)
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(8.0, 3.2))
     # Panel kiri: waktu handoff (sumbu kiri) dan throughput (sumbu kanan) vs |H|.
     a1.plot(H, drain, marker="o", color="#1F3B73")
+    # Garis budget drain: titik yang menyentuhnya adalah backlog yang TAK selesai dalam anggaran waktu
+    # (di situlah ceiling per-node berada).
+    a1.axhline(budget_s, ls=":", color="grey", lw=0.8)
+    a1.text(H[0], budget_s, f" {budget_s:.0f} s budget", va="top", ha="left", fontsize=7, color="grey")
     a1.set_xlabel("$|H|$ (stateful processes)")
     a1.set_ylabel("handoff time (s)", color="#1F3B73")
     a1b = a1.twinx()

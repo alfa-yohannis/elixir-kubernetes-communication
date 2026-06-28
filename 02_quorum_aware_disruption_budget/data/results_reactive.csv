@@ -1,0 +1,7 @@
+policy,attempt,n,q,min_available,max_unavailable,min_observed,violated
+reactive,1,9,5,1,8,1,true
+reactive,2,9,5,2,7,2,true
+reactive,3,9,5,3,6,3,true
+reactive,4,9,5,4,5,4,true
+reactive,5,9,5,5,4,5,false
+model_based,1,9,5,5,4,5,false

@@ -220,7 +220,8 @@ def reactive_fig(rs):
     axb.plot(att, grace, marker="D", color="#1F3B73")
     axb.set_ylabel("grace used (s, doubling)", color="#1F3B73")
     total = sum(lost)
-    ax.set_title(f"Reactive baseline: {total} lost before converging; controller loses 0 in one shot")
+    ax.set_title(f"Reactive baseline: {total} lost before converging\n(model-based controller: 0, one-shot)",
+                 fontsize=10)
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
     save(fig, "eval_reactive.pdf")

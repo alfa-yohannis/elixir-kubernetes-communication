@@ -1,0 +1,31 @@
+# Deployment operator: satu replika pengendali yang membaca probe kuorum tiap pod app lalu menambal
+# minAvailable PodDisruptionBudget. Memakai image yang sama dengan app, dibedakan oleh QUORUM_ROLE.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: quorum-operator, namespace: default}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: quorum-operator}}
+  template:
+    metadata: {labels: {app: quorum-operator}}
+    spec:
+      serviceAccountName: quorum-operator
+      containers:
+        - name: operator
+          image: quorum_budget:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: QUORUM_ROLE, value: "operator"}
+            - {name: QUORUM_PDB, value: "quorum"}
+            - {name: QUORUM_SELECTOR, value: "app=quorum"}
+            - name: QUORUM_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - {name: RELEASE_COOKIE, value: "quorum-cookie-change-me"}
+          livenessProbe:
+            exec: {command: ["/app/bin/quorum_budget", "pid"]}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}

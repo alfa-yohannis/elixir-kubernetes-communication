@@ -1,0 +1,11 @@
+policy,n,q,batch,batches,rep,min_available,quorum_violated,maintenance_ms
+conservative,9,5,1,9,1,8,false,3491
+conservative,9,5,1,9,2,8,false,3486
+conservative,9,5,1,9,3,8,false,3495
+conservative,9,5,1,9,4,8,false,3483
+conservative,9,5,1,9,5,8,false,3488
+quorum_aware,9,5,4,3,1,5,false,1189
+quorum_aware,9,5,4,3,2,5,false,1217
+quorum_aware,9,5,4,3,3,5,false,1223
+quorum_aware,9,5,4,3,4,5,false,1210
+quorum_aware,9,5,4,3,5,5,false,1209

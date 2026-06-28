@@ -1,0 +1,9 @@
+policy,n,q,static_budget,batch,min_available,quorum_violated,blocked_batches,maintenance_ms
+static,3,2,2,2,1,true,1,777
+quorum_aware,3,2,2,1,2,false,0,1150
+static,5,3,3,3,2,true,1,777
+quorum_aware,5,3,3,2,3,false,0,1158
+static,7,4,4,4,3,true,1,794
+quorum_aware,7,4,4,3,4,false,0,1173
+static,9,5,5,5,4,true,1,815
+quorum_aware,9,5,5,4,5,false,0,1181

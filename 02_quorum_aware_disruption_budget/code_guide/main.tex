@@ -1,0 +1,131 @@
+% Panduan kode artifact M7 (PDB sadar-kuorum), Bahasa Indonesia, untuk mahasiswa S1 tahun ke-3.
+% Build:  latexmk -pdf main.tex   (pdfLaTeX cukup; tanpa font khusus)
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[bahasa]{babel}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor={blue!55!black}, urlcolor={magenta!70!black}}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\definecolor{codebg}{HTML}{F6F8FA}
+\lstset{
+  basicstyle=\ttfamily\small, backgroundcolor=\color{codebg},
+  keywordstyle=\color{blue!60!black}\bfseries, commentstyle=\color{gray!60!black}\itshape,
+  stringstyle=\color{green!45!black}, frame=single, framesep=5pt, rulecolor=\color{gray!40},
+  breaklines=true, showstringspaces=false, columns=fullflexible,
+  numbers=left, numberstyle=\tiny\color{gray!70}, xleftmargin=2.2em,
+  morekeywords={def,defp,defmodule,do,end,case,cond,fn,when,use,alias,require,GenServer}
+}
+
+\title{\textbf{Panduan Kode: Pengendali PodDisruptionBudget Sadar-Kuorum (M7)}\\[3pt]
+\large Artifact paper ``Closing the Quorum Gap''}
+\author{Universitas Pradita}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Gambaran Umum}
+Artifact ini menyetel \emph{seberapa banyak pod boleh dimatikan sekaligus} saat gangguan sukarela
+(rolling update, drain node, scale-down) di Kubernetes, agar tidak pernah memecah \emph{kuorum}
+cluster BEAM (Elixir terdistribusi). Intinya satu ide: \textbf{PodDisruptionBudget (PDB) yang
+biasanya statis dan disetel manual, di sini diturunkan dari kuorum runtime}.
+
+Komponennya kecil dan terpisah tugas:
+\begin{itemize}[nosep]
+  \item \code{QuorumBudget.Quorum} --- \emph{policy murni}: menghitung budget (\code{minAvailable},
+        \code{maxUnavailable}) dari ukuran cluster $N$ dan ambang kuorum $Q$. Tanpa efek samping,
+        mudah diuji.
+  \item \code{QuorumBudget.Cluster} --- membaca keanggotaan cluster (\code{Node.list/0}) dan
+        menurunkan $Q$ (mayoritas atau floor).
+  \item \code{QuorumBudget.QuorumProbe} --- \emph{sensor read-only} (\code{GenServer}) yang melaporkan
+        $N$, $Q$, dan apakah node sedang berkuorum.
+  \item \code{QuorumBudget.PDBOperator} --- \emph{operator} Kubernetes: membaca probe tiap pod lalu
+        menambal \code{minAvailable} PDB lewat \code{kubectl}.
+  \item \code{QuorumBudget.Disruptor} --- mesin eksperimen: mensimulasikan rolling update sungguhan
+        pada cluster peer dan \emph{mengukur} ukuran cluster tersisa.
+  \item \code{QuorumBudget.Harness} --- membungkus pengukuran tiap RQ menjadi baris CSV.
+\end{itemize}
+
+\section{Policy Kuorum (\code{quorum.ex})}
+Ini jantung yang dapat dibuktikan. Rumusnya:
+\begin{center}
+\code{minAvailable = max(Q, q\_min)} \quad dan \quad \code{maxUnavailable = min(N - minAvailable, cap)}
+\end{center}
+\code{minAvailable = Q} menegakkan invarian keselamatan: anggota tersedia $A$ tak pernah turun di
+bawah kuorum. \code{maxUnavailable} adalah ``ruang di atas kuorum'', dibatasi lagi oleh kapasitas
+handoff \code{cap} (kopling ke pengendali grace M3: jangan matikan lebih banyak pod daripada yang
+state-nya bisa dipindah tepat waktu).
+
+\begin{lstlisting}
+def budget(reading, opts \\ []) do
+  n = reading.n; q = reading.q
+  q_min = Keyword.get(opts, :q_min, 1)
+  cap = Map.get(reading, :cap, n)
+  min_available = q |> max(q_min) |> min(n)
+  max_unavailable = (n - min_available) |> min(trunc(cap)) |> max(0)
+  %{min_available: min_available, max_unavailable: max_unavailable}
+end
+\end{lstlisting}
+
+Fungsi pendukung: \code{majority(n) = div(n,2)+1} (kuorum mayoritas), \code{violates\_quorum?(a,d,q)}
+(apakah mengusir $d$ dari $a$ melanggar $Q$), dan \code{admit\_eviction(available, min\_available)}
+(keputusan izinkan/tolak satu eviction --- inilah yang ditegakkan PDB Kubernetes).
+
+\section{Membaca Cluster (\code{cluster.ex})}
+\code{size/0} mengembalikan \code{length(Node.list()) + 1} (peer yang terlihat + diri sendiri).
+\code{quorum\_threshold/1} menghitung $Q$: mayoritas dari ukuran hidup, atau bilangan tetap bila
+beban kerja (mis. \code{:global}/CRDT) mendeklarasikan floor lewat konfigurasi.
+
+\section{Probe \& Operator (\code{quorum\_probe.ex}, \code{pdb\_operator.ex})}
+Probe adalah \code{GenServer} yang, saat ditanya, melaporkan map \code{\%\{n, q, cap, in\_quorum\}}.
+Endpoint HTTP \code{GET /probe} (di \code{probe\_http.ex}) hanya membungkusnya sebagai JSON.
+
+Operator berjalan di pod terpisah (peran \code{operator}, dipilih env \code{QUORUM\_ROLE}). Tiap 5
+detik ia: (1) mendaftar IP pod app via \code{kubectl}, (2) membaca \code{/probe} tiap pod, (3)
+menghitung \code{minAvailable} (mengambil yang TERBESAR antar-pod --- paling aman bila pod sedang tak
+sepakat soal ukuran cluster), lalu (4) menambal \code{spec.minAvailable} PDB. Semua dibungkus
+\code{try/catch}: error API sementara hanya di-log, operator tak crash (fail-safe).
+
+\section{Mesin Eksperimen (\code{disruptor.ex})}
+Untuk membuktikan klaim keselamatan dengan \emph{pengukuran nyata} (bukan aritmetika), \code{Disruptor}
+membentuk cluster $n$ peer dan menjalankan rolling update: tiap batch (= ukuran budget) benar-benar
+diputus dari cluster (\code{Node.disconnect}), lalu ukuran cluster tersisa DIUKUR dari
+\code{Node.list/0} sebuah node survivor, lalu disambung kembali. Metrik: \code{min\_available} (ukuran
+terkecil terukur), \code{quorum\_violated?} ($< Q$), dan \code{maintenance\_ms}.
+
+\section{Menjalankan Eksperimen per RQ}
+\begin{description}[leftmargin=1.5em]
+  \item[RQ1 (safety) \& RQ2 (efficiency)] cluster peer nyata:
+    \begin{lstlisting}[numbers=none]
+MIX_ENV=test elixir --name primary@127.0.0.1 --cookie ck -S mix run harness/run.exs
+    \end{lstlisting}
+    Menulis \code{data/results\_safety.csv} dan \code{results\_efficiency.csv}. Hasil: budget statis
+    memecah kuorum di tiap ukuran; quorum-aware tak pernah; dan quorum-aware $\sim$2,9$\times$ lebih
+    cepat daripada konservatif (satu-per-satu).
+  \item[RQ3--RQ6 (policy murni)] \code{MIX\_ENV=test mix run harness/policy.exs} ---
+    \code{results\_scale.csv} (\code{minAvailable} melacak mayoritas; hitung $O(1)$ $\sim$48\,ns),
+    \code{results\_sensitivity.csv} (under-estimasi $Q$ tak aman $\to$ bias ke atas).
+  \item[RQ7 (kind)] \code{bash code/k8s/rq7\_eviction.sh} --- pada cluster kind hidup, PDB sadar-kuorum
+    (\code{minAvailable}=$Q$) membuat eviction API MENOLAK eviction yang memecah kuorum; PDB
+    tak-sadar-kuorum mengizinkannya.
+\end{description}
+
+\section{Figur \& Tes}
+\code{code/analysis/plot.py} merender lima figur dari \code{data/*.csv}. Tes: \code{mix test}
+(policy murni) dan tes terdistribusi \code{mix test --only cluster} (menegaskan klaim safety pada
+cluster peer sungguhan).
+
+\section{Penerapan Kubernetes}
+Manifes di \code{code/k8s/}: \code{rbac.yaml} (hak-paling-kecil: operator boleh baca pod +
+baca/tambal PDB), \code{app.yaml} (Deployment $N$ replika + headless Service + PDB awal), dan
+\code{operator.yaml} (Deployment operator). Satu image (\code{Dockerfile}) dipakai dua peran,
+dibedakan env \code{QUORUM\_ROLE}.
+
+\end{document}

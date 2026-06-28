@@ -1,0 +1,61 @@
+# Deployment aplikasi: N replika yang membentuk satu cluster BEAM (libcluster strategi Kubernetes),
+# sebuah headless Service untuk discovery, dan PodDisruptionBudget AWAL yang akan DITAMBAL operator
+# menjadi minAvailable = kuorum. Nilai minAvailable di sini hanya placeholder konservatif sebelum
+# operator pertama kali reconcile.
+---
+apiVersion: v1
+kind: Service
+metadata: {name: quorum-headless, namespace: default}
+spec:
+  clusterIP: None              # headless: DNS mengembalikan IP tiap pod (dipakai libcluster)
+  selector: {app: quorum}
+  ports: [{name: epmd, port: 4369}, {name: probe, port: 4000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: quorum, namespace: default}
+spec:
+  replicas: 5
+  selector: {matchLabels: {app: quorum}}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  template:
+    metadata: {labels: {app: quorum}}
+    spec:
+      serviceAccountName: quorum-app
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: quorum
+          image: quorum_budget:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: QUORUM_ROLE, value: "app"}
+            - {name: RELEASE_NAME, value: "quorum"}
+            - {name: QUORUM_SELECTOR, value: "app=quorum"}
+            - name: QUORUM_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            # Cookie distribusi Erlang (harus identik di semua pod) -> dari Secret di produksi.
+            - {name: RELEASE_COOKIE, value: "quorum-cookie-change-me"}
+          ports: [{containerPort: 4000, name: probe}]
+          readinessProbe:                 # siap hanya bila pod sudah berada dalam kuorum cluster
+            httpGet: {path: /probe, port: 4000}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 4000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: quorum, namespace: default}
+spec:
+  # Placeholder; operator menambal ini ke kuorum mayoritas (mis. 3 untuk 5 replika) tiap reconcile.
+  minAvailable: 3
+  selector: {matchLabels: {app: quorum}}

@@ -1,0 +1,28 @@
+@startuml
+' Sequence diagram: interaksi LINTAS-LAPIS Elixir <-> Kubernetes (PDB sadar-kuorum).
+' Bagian atas = loop reconcile operator; bagian bawah = gangguan sukarela (drain) ditolak PDB.
+' Tema PlantUML/UML standar. Render: plantuml -tpdf seq_crosslayer.puml
+title Interaksi lintas-lapis Elixir <-> Kubernetes (PDB sadar-kuorum)
+
+actor "Admin\n(kubectl drain)" as Adm
+participant "PDBOperator\n(Elixir + kubectl)" as Op
+participant "API server /\nPodDisruptionBudget" as API
+participant "Pod aplikasi\n(QuorumProbe, ProbeHTTP)" as Pod
+
+== Loop reconcile operator (tiap 5 detik) ==
+Op -> API : kubectl get pods
+API --> Op : daftar IP pod
+Op -> Pod : HTTP GET /probe
+Pod --> Op : {n, q (ambang kuorum)}
+Op -> Op : Quorum.budget(...)  ->  minAvailable = Q
+Op -> API : kubectl patch pdb\nminAvailable = Q
+
+== Gangguan sukarela (drain / rolling update) ==
+Adm -> API : minta usir (evict) pod
+alt eviction akan memecah kuorum (available - 1 < Q)
+  API --> Adm : DENY (HTTP 429, dijaga PDB)
+  note over Adm #ccffcc: kuorum BEAM terjaga
+else masih dalam budget (available - 1 >= Q)
+  API --> Adm : ALLOW (pod keluar)
+end
+@enduml

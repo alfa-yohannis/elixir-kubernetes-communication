@@ -58,14 +58,14 @@
 
 \begin{document}
 
-\title{Closing the Grace Gap: An Adaptive Termination-Grace Controller Coupling
-Kubernetes Pod Termination with BEAM Cluster Convergence for Zero-Loss Rolling Updates}
+\title{Closing the Grace Gap: Loss-Free Pod Shutdown for Stateful Clustered
+Applications on Kubernetes}
 
 \author[1]{Alfa Yohannis}
 \author[2]{Alexander Waworuntu}
 
 \authormark{YOHANNIS \textsc{and} WAWORUNTU}
-\titlemark{Closing the Grace Gap: Coupling Kubernetes Termination with BEAM Convergence}
+\titlemark{Closing the Grace Gap: Loss-Free Pod Shutdown on Kubernetes}
 
 \address[1]{\orgdiv{Department of Informatics}, \orgname{Universitas Pradita},
   \orgaddress{\city{Tangerang}, \country{Indonesia}}}
@@ -78,24 +78,22 @@ Kubernetes Pod Termination with BEAM Cluster Convergence for Zero-Loss Rolling U
 %\fundingInfo{}
 
 \abstract[Abstract]{%
-Stateful services increasingly run on container orchestrators that add their own recovery on top of
-the application runtime's. When such a service is upgraded, or a machine is withdrawn for
-maintenance, an instance that is about to be removed must first migrate its in-memory state to
-surviving instances and let the cluster settle before it disappears. To bound this shutdown, the
-orchestrator grants a fixed, operator-chosen \emph{grace period} and then forcibly terminates the
-instance. We argue that a fixed grace period is structurally mismatched to this task: set it too low
-and forced termination interrupts the migration, losing state and availability; set it defensively
-high and every instance slows the rollout, making upgrades sluggish and resource-hungry. The time
-actually required is not a constant---it grows with the amount of state to migrate and with the load
-on the cluster---so no single value is right for all instances or all moments. We present a
-cross-layer feedback controller that \emph{derives} the grace period at run time from the runtime's
-own progress signals rather than guessing it in advance, and that paces the rollout accordingly. We
-formalise a safety condition relating the orchestrator's shutdown window to the runtime's migration
-and convergence time, provide an open reference implementation on Kubernetes, and evaluate it against
-fixed and over-provisioned baselines under fault injection. On a two-node cluster the controller
-eliminates the state loss that a fixed 30\,s grace incurs once the handoff outlasts it (40 of 160
-stateful processes), while granting only the grace actually needed ($16$--$46$\,s) instead of a
-fixed, over-provisioned 300\,s.}
+Stateful services increasingly run on container orchestrators that add their own recovery on top of the
+application runtime's. When such a service is upgraded, or a machine is withdrawn for maintenance, an
+instance about to be removed must first migrate its in-memory state to surviving instances and let the
+cluster settle before it disappears. To bound this shutdown, the orchestrator grants a fixed,
+operator-chosen \emph{grace period} and then forcibly terminates the instance. We argue that a fixed
+grace period is structurally mismatched to this task: set it too low and forced termination interrupts
+the migration, losing state and availability; set it defensively high and every instance slows the
+rollout. The time actually required is not a constant---it grows with the amount of state to migrate and
+the load on the cluster---so no single value is right for all instances or all moments. We present a
+cross-layer feedback controller that \emph{derives} the grace period at run time from the runtime's own
+progress signals, and paces the rollout accordingly. We formalise a safety condition linking the
+shutdown window to the runtime's migration and convergence time, provide an open reference
+implementation on Kubernetes for Erlang/BEAM clusters, and evaluate it against fixed and
+over-provisioned baselines under fault injection. Where a fixed short grace loses about 25\% of the
+in-flight state once migration outlasts it, the controller loses 0\%, while reserving up to
+$\sim$$19\times$ less time than a defensive worst-case grace---keeping upgrades both safe and fast.}
 
 \keywords{Kubernetes, Erlang/BEAM, Elixir/OTP, graceful shutdown, rolling update,
 fault tolerance, cross-layer coordination, Horde, libcluster}
@@ -629,7 +627,15 @@ single-host emulation (a threat to validity, Section~\ref{sec:discuss}). Beyond 
 loads of Table~\ref{tab:eval}, we sweep the handoff need over $\{10,25,40\}$\,s---below, at, and above
 the 30\,s fixed grace---with three repeats each, run a three-pod rolling update, measure the
 controller's overhead, analyse the grace policy's sensitivity, and scale a single node's backlog
-from $1{,}000$ to $40{,}000$ stateful processes.
+from $1{,}000$ to $80{,}000$ stateful processes.
+
+\paragraph{Environment.} Experiments run on an Intel Core i9-11900H ($16$ logical cores at $2.5$\,GHz)
+with $30$\,GiB RAM under Ubuntu~$24.04$ (Linux~$6.8$). The runtime is Erlang/OTP~$29$
+(\texttt{erts}~$17.0.2$, JIT) with Elixir~$1.20$; the application uses \texttt{Horde}~$0.10$,
+\texttt{libcluster}~$3.5$, \texttt{Phoenix.PubSub}~$2.2$, \texttt{bandit}~$1.12$, \texttt{plug}~$1.19$,
+and \texttt{jason}~$1.4$. The Kubernetes experiments use \texttt{kind}~$0.23$ provisioning
+Kubernetes~$1.30$ (\texttt{containerd}~$1.7.15$), driven by \texttt{kubectl}~$1.30$; figures are rendered
+with Python~$3.14$ and Matplotlib~$3.10$.
 
 \paragraph{Results.} Table~\ref{tab:eval} reports two loads: a light one whose handoff need
 ($\approx$10\,s) is below the fixed grace, and a heavier one whose need ($\approx$40\,s) exceeds it;
@@ -695,8 +701,8 @@ $\approx$ need, zero loss) within the bound $g_{\max}$---no deadlock and no zomb
 
 \paragraph{Sweep across load (RQ1, RQ2).} Figure~\ref{fig:sweep} repeats the comparison over the
 need sweep. The two fixed-grace policies lose no state while the need stays below the 30\,s grace,
-then lose $\approx$103 of 400 processes once it exceeds it; the adaptive controller and the 300\,s
-grace never lose state. The controller's granted grace tracks the need ($16\to31\to46$\,s for need
+then lose $\approx$103 of the 400 processes at the heaviest sweep point (need~$40$\,s) once it exceeds
+it; the adaptive controller and the 300\,s grace never lose state. The controller's granted grace tracks the need ($16\to31\to46$\,s for need
 $10\to25\to40$\,s) while the fixed 300\,s reserves an order of magnitude more than required. Variance
 over the three repeats is negligible---the mechanism is deterministic under the throttle.
 
@@ -708,7 +714,7 @@ empirically across the sweep; the fixed 30\,s and \texttt{preStop} policies cros
 floor once the need exceeds 30\,s, landing in the unsafe region where the handoff is truncated (the
 lost points, ringed). The fixed 300\,s policy is safe but sits far above the floor---reserving
 roughly $6$--$7\times$ the grace the heaviest load needs, and an order of magnitude more under light
-load. The controller is the only policy in the desirable region: above the floor (safe) yet close to
+load. The controller is the only one of the four policies in the desirable region: above the floor (safe) yet close to
 it (no over-provisioning).
 
 \begin{figure}[t]
@@ -1039,7 +1045,8 @@ a setpoint in computing systems under varying load~\cite{hellerstein2004feedback
 apply the same idea to autoscaling~\cite{senjab2023k8s}. We do \emph{not} claim adaptive deadlines as
 novel. Our contribution is the observation that the orchestrator's \emph{termination} deadline is a
 deadline of exactly this kind, and the closing of the specific control loop between a Kubernetes grace
-period and a BEAM runtime's handoff and convergence signals---a coupling no prior system makes.
+period and a BEAM runtime's handoff and convergence signals---a coupling that, to our knowledge, no
+prior system makes.
 
 \paragraph{State migration.} Evacuating live state from a departing host is studied at every layer.
 Virtual-machine and container live migration relocate an entire instance with minimal

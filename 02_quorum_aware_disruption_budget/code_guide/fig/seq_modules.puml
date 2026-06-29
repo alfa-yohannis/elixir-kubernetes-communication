@@ -1,0 +1,21 @@
+@startuml
+' Sequence diagram: interaksi antar-modul Elixir saat SATU rolling update (eksperimen) berjalan.
+' Tema PlantUML/UML standar (tanpa skinparam khusus). Render: plantuml -tpdf seq_modules.puml
+title Interaksi antar-modul: satu rolling update (eksperimen)
+
+participant "Harness\n(driver)" as HN
+participant "Disruptor\n(mesin eksperimen)" as D
+participant "Cluster\n(di node survivor)" as C
+participant "QuorumWorkload\n(di node survivor)" as WL
+
+HN -> D : rolling_cycle(nodes, batch, q)
+loop tiap batch (= maxUnavailable)
+  D -> D : evict(batch)  (Node.disconnect)
+  D -> C : measure_available()  (baca Node.list)
+  C --> D : ukuran cluster yang tersisa
+  D -> WL : in_quorum?()  (apakah survivor masih berkuorum)
+  WL --> D : true / false (false = commit terblokir)
+  D -> D : rejoin(batch)  (Node.connect)
+end
+D --> HN : %{min_available, quorum_violated?,\nblocked_survivors, maintenance_ms}
+@enduml
